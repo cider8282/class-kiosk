@@ -2,1358 +2,1102 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SEBIT Light World · One-File Demo (Teacher + Student)</title>
-  <style>
-    :root{
-      --bg1:#2b2b2b;
-      --bg2:#1f1f1f;
-      --paper:#f3efe2;
-      --paper2:#efe6d2;
-      --ink:#2b241b;
-      --muted:#6e6252;
-      --line:rgba(43,36,27,.18);
-      --gold:#caa14a;
-      --olive:#4e6a47;
-      --olive2:#2f4a2a;
-      --danger:#8b3a2a;
-      --shadow: 0 18px 45px rgba(0,0,0,.25);
-      --r:18px;
-      --rs:14px;
-      --tap:44px;
-    }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{
-      margin:0;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Apple SD Gothic Neo","Noto Sans KR","Segoe UI", Arial, sans-serif;
-      color:var(--ink);
-      background:
-        radial-gradient(1200px 900px at 20% 10%, rgba(255,255,255,.14), transparent 60%),
-        radial-gradient(900px 700px at 80% 15%, rgba(255,213,138,.10), transparent 55%),
-        radial-gradient(1000px 900px at 50% 90%, rgba(255,255,255,.08), transparent 60%),
-        linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
-      display:flex;
-      justify-content:center;
-      padding:22px 14px;
-    }
-
-    /* iPad portrait-ish frame */
-    .frame{
-      width:min(940px, 100%);
-      max-width:940px;
-      aspect-ratio: 3/4.6;
-      border-radius:28px;
-      overflow:hidden;
-      position:relative;
-      background:
-        radial-gradient(900px 700px at 20% 0%, rgba(255,255,255,.09), transparent 55%),
-        radial-gradient(700px 600px at 80% 20%, rgba(255,255,255,.06), transparent 55%),
-        linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.12));
-      box-shadow: var(--shadow);
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .bg{
-      position:absolute; inset:0;
-      background:
-        radial-gradient(600px 420px at 20% 18%, rgba(255,255,255,.14), transparent 60%),
-        radial-gradient(640px 440px at 70% 20%, rgba(255,255,255,.10), transparent 55%),
-        linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.34));
-      pointer-events:none;
-    }
-
-    /* Top bar */
-    header.topbar{
-      position:absolute; left:0; right:0; top:0;
-      padding:18px 20px 12px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:14px;
-      color:#f6f1e3;
-      text-shadow: 0 2px 10px rgba(0,0,0,.35);
-      z-index:4;
-    }
-    .brand{display:flex;flex-direction:column;gap:2px;letter-spacing:.06em}
-    .brandRow{display:flex;align-items:center;gap:10px}
-    .brand .title{font-weight:900;font-size:34px;line-height:1}
-    .brand .subtitle{font-size:13px;opacity:.92}
-    .stars{display:inline-flex;gap:6px;transform:translateY(-4px);opacity:.95}
-    .star{
-      width:10px;height:10px;display:inline-block;background:rgba(255,215,120,.92);
-      clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
-      filter: drop-shadow(0 2px 6px rgba(0,0,0,.25));
-    }
-
-    .rightControls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
-    .chip{
-      display:inline-flex;align-items:center;gap:8px;
-      padding:8px 10px;border-radius:999px;
-      background: rgba(255,255,255,.08);
-      border:1px solid rgba(255,255,255,.14);
-      backdrop-filter: blur(6px);
-      color:#f6f1e3;
-      font-weight:800;
-      font-size:13px;
-      min-height:40px;
-    }
-    .avatar{
-      width:34px;height:34px;border-radius:999px;
-      display:grid;place-items:center;
-      background:
-        radial-gradient(circle at 35% 30%, rgba(255,255,255,.35), transparent 60%),
-        linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.22));
-      border:1px solid rgba(255,255,255,.22);
-      font-size:18px;
-    }
-    .toggle{
-      display:inline-flex;align-items:center;
-      gap:8px;
-      padding:8px 10px;border-radius:999px;
-      background: rgba(255,255,255,.08);
-      border:1px solid rgba(255,255,255,.14);
-      backdrop-filter: blur(6px);
-      min-height:40px;
-    }
-    .toggle button{
-      height:30px; min-width:92px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.16);
-      background: rgba(0,0,0,.18);
-      color:#f6f1e3;
-      font-weight:900;
-      cursor:pointer;
-      padding:0 10px;
-    }
-    .toggle button.active{
-      background: linear-gradient(180deg, rgba(255,221,140,.95), rgba(255,196,92,.95));
-      color:#2b241b;
-      border-color: rgba(255,221,140,.55);
-      text-shadow:none;
-    }
-
-    /* Parchment panel (main app) */
-    main.panel{
-      position:absolute;
-      left:20px; right:20px;
-      top:96px; bottom:20px;
-      padding:16px 16px 14px;
-      border-radius: var(--r);
-      background:
-        radial-gradient(900px 500px at 40% 10%, rgba(255,255,255,.55), transparent 65%),
-        linear-gradient(180deg, var(--paper) 0%, var(--paper2) 100%);
-      border:1px solid rgba(60,40,20,.22);
-      box-shadow: 0 20px 55px rgba(0,0,0,.18);
-      z-index:2;
-      overflow:hidden;
-    }
-
-    .panelHeader{
-      display:flex;align-items:center;justify-content:space-between;gap:12px;
-      padding:6px 8px 12px;
-      border-bottom:1px solid var(--line);
-    }
-    .panelHeader h1{margin:0;font-size:22px;font-weight:900;letter-spacing:-.02em}
-    .panelHeader .date{color:var(--muted);font-weight:800;font-size:13px}
-    .panelBody{
-      display:grid;
-      grid-template-columns: 240px 1fr;
-      gap:14px;
-      height: calc(100% - 56px);
-      padding:12px 8px 0;
-      overflow:hidden;
-    }
-
-    /* Left nav */
-    nav.sidenav{
-      border:1px solid var(--line);
-      border-radius: var(--rs);
-      background: rgba(255,255,255,.40);
-      padding:10px;
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      overflow:auto;
-    }
-    .navTitle{
-      font-weight:900;font-size:14px;color:var(--muted);
-      display:flex;align-items:center;justify-content:space-between;
-      padding:4px 6px 0;
-    }
-    .navBtn{
-      height:var(--tap);
-      border-radius:14px;
-      border:1px solid var(--line);
-      background: rgba(255,255,255,.55);
-      font-weight:900;
-      cursor:pointer;
-      display:flex;align-items:center;gap:10px;
-      padding:0 12px;
-      text-align:left;
-      color:var(--ink);
-    }
-    .navBtn .i{width:22px;text-align:center}
-    .navBtn.active{
-      border-color: rgba(202,161,74,.45);
-      background: rgba(202,161,74,.16);
-      box-shadow: 0 8px 18px rgba(0,0,0,.08);
-    }
-    .navHint{
-      margin-top:auto;
-      padding:10px 10px 6px;
-      border-top:1px dashed rgba(43,36,27,.18);
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.35;
-    }
-
-    /* Content area */
-    .content{
-      border:1px solid var(--line);
-      border-radius: var(--rs);
-      background: rgba(255,255,255,.38);
-      padding:12px;
-      overflow:auto;
-    }
-
-    .grid{
-      display:grid;
-      grid-template-columns: repeat(12,1fr);
-      gap:12px;
-    }
-    .card{
-      grid-column: span 6;
-      background: rgba(255,255,255,.55);
-      border:1px solid var(--line);
-      border-radius: var(--rs);
-      padding:12px;
-    }
-    .cardHeader{
-      display:flex;align-items:center;justify-content:space-between;gap:10px;
-      margin-bottom:8px;
-    }
-    .cardHeader .t{
-      font-weight:900;font-size:16px;
-      display:flex;align-items:center;gap:8px;
-    }
-    .pill{
-      display:inline-flex;align-items:center;gap:6px;
-      padding:4px 9px;border-radius:999px;
-      background: rgba(202,161,74,.16);
-      border:1px solid rgba(202,161,74,.35);
-      color:#6a4b14;
-      font-size:12px;font-weight:800;
-      white-space:nowrap;
-    }
-    .muted{color:var(--muted)}
-    .row{
-      display:flex;align-items:center;justify-content:space-between;gap:10px;
-      padding:10px 10px;
-      background: rgba(255,255,255,.35);
-      border:1px dashed rgba(43,36,27,.18);
-      border-radius: 14px;
-      font-size:13px;
-      margin-top:8px;
-    }
-    .row b{font-size:14px}
-    .ok{color:#2f5a2a;font-weight:900}
-    .warn{color:#8b5a1f;font-weight:900}
-    .bad{color:var(--danger);font-weight:900}
-
-    .btn{
-      height:var(--tap);
-      border-radius:999px;
-      border:1px solid var(--line);
-      background: rgba(255,255,255,.60);
-      font-weight:900;
-      cursor:pointer;
-      padding:0 14px;
-      display:inline-flex;align-items:center;justify-content:center;gap:10px;
-      user-select:none;
-    }
-    .btn.primary{
-      background: linear-gradient(180deg, rgba(94,131,83,.98), rgba(54,93,47,.98));
-      color:#f7f2e5;
-      border:1px solid rgba(35,55,30,.35);
-      box-shadow: 0 10px 20px rgba(0,0,0,.12);
-    }
-    .btn.danger{
-      background: rgba(139,58,42,.12);
-      border-color: rgba(139,58,42,.35);
-      color: var(--danger);
-    }
-    .btn.small{height:36px;padding:0 12px;border-radius:14px;font-weight:900}
-    .btnRow{display:flex;gap:10px;flex-wrap:wrap}
-
-    .table{
-      width:100%;
-      border-collapse:separate;
-      border-spacing:0;
-      overflow:hidden;
-      border:1px solid var(--line);
-      border-radius: 14px;
-      background: rgba(255,255,255,.55);
-      margin-top:10px;
-    }
-    .table th,.table td{
-      padding:10px 10px;
-      font-size:13px;
-      border-bottom:1px solid rgba(43,36,27,.10);
-      text-align:left;
-      vertical-align:middle;
-    }
-    .table th{
-      background: rgba(202,161,74,.10);
-      font-weight:900;
-      color:#5b4a2b;
-      position:sticky;
-      top:0;
-      z-index:1;
-    }
-    .table tr:last-child td{border-bottom:0}
-    .mini{
-      font-size:12px;color:var(--muted);font-weight:800
-    }
-
-    input[type="text"], input[type="number"], select, textarea{
-      width:100%;
-      border:1px solid var(--line);
-      border-radius:14px;
-      padding:10px 12px;
-      font-weight:800;
-      background: rgba(255,255,255,.65);
-      color:var(--ink);
-      outline:none;
-    }
-    textarea{min-height:110px;resize:vertical}
-    .twoCol{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .threeCol{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-
-    /* Student screen “parchment popup” style within content */
-    .studentPanel{
-      background:
-        radial-gradient(900px 500px at 40% 10%, rgba(255,255,255,.55), transparent 65%),
-        linear-gradient(180deg, var(--paper) 0%, var(--paper2) 100%);
-      border:1px solid rgba(60,40,20,.22);
-      border-radius: var(--r);
-      padding:14px;
-    }
-    .studentTop{
-      display:flex;align-items:center;justify-content:space-between;gap:10px;
-      border-bottom:1px solid var(--line);
-      padding:8px 8px 12px;
-      margin-bottom:12px;
-    }
-    .studentTop .h{
-      font-size:22px;font-weight:900;letter-spacing:-.02em;margin:0
-    }
-    .studentTop .x{
-      width:38px;height:38px;border-radius:12px;border:1px solid var(--line);
-      background:rgba(255,255,255,.55);cursor:pointer;color:var(--muted);
-      display:grid;place-items:center;font-size:18px;
-    }
-    .studentGrid{display:grid;gap:12px}
-    .studentCard{
-      background: rgba(255,255,255,.55);
-      border:1px solid var(--line);
-      border-radius: var(--rs);
-      padding:12px;
-      display:flex;
-      gap:12px;
-      align-items:flex-start;
-    }
-    .studentIcon{
-      width:44px;height:44px;border-radius:14px;
-      background: rgba(255,255,255,.55);
-      border:1px solid var(--line);
-      display:grid;place-items:center;font-size:22px;
-      flex:0 0 auto;
-    }
-    .studentTitle{
-      font-weight:900;font-size:16px;display:flex;align-items:center;gap:8px;margin-bottom:6px
-    }
-    .shortcuts{
-      display:grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap:10px;
-      margin-top:12px;
-    }
-    .shortcutBtn{
-      height:var(--tap);
-      border-radius:16px;
-      border:1px solid var(--line);
-      background: rgba(255,255,255,.60);
-      font-weight:900;
-      cursor:pointer;
-      display:flex;align-items:center;justify-content:center;gap:8px;
-      font-size:13px;
-    }
-
-    /* Toast */
-    .toast{
-      position:absolute;
-      left:50%;
-      bottom:14px;
-      transform:translateX(-50%);
-      background: rgba(20,16,12,.88);
-      color:#f6f1e3;
-      padding:10px 14px;
-      border-radius:999px;
-      font-weight:900;
-      font-size:13px;
-      border:1px solid rgba(255,255,255,.14);
-      box-shadow:0 10px 30px rgba(0,0,0,.25);
-      opacity:0;
-      transition:opacity .15s ease;
-      z-index:10;
-      pointer-events:none;
-      white-space:nowrap;
-      max-width: calc(100% - 24px);
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .toast.show{opacity:1}
-
-    @media (max-width:760px){
-      .panelBody{grid-template-columns:1fr}
-      nav.sidenav{flex-direction:row;flex-wrap:wrap;align-content:flex-start}
-      .navBtn{flex:1 1 calc(50% - 10px)}
-      .navHint{display:none}
-      .card{grid-column:span 12}
-      .shortcuts{grid-template-columns:1fr}
-    }
-  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>SEBIT Light World</title>
+  <link rel="stylesheet" href="style.css"/>
+  <script defer src="app.js"></script>
 </head>
 <body>
-  <div class="frame" role="application" aria-label="SEBIT Light World One-File Demo">
+  <div class="app">
     <div class="bg" aria-hidden="true"></div>
 
-    <header class="topbar">
-      <div class="brand">
-        <div class="brandRow">
-          <div class="title">SEBIT</div>
-          <div class="stars" aria-hidden="true"><span class="star"></span><span class="star"></span></div>
-        </div>
-        <div class="subtitle">Small lights, bright world.</div>
-      </div>
+    <!-- INTRO (공용) -->
+    <section class="page" data-page="intro" aria-label="인트로">
+      <div class="safe-center intro">
+        <div class="intro-card">
+          <div class="brand">
+            <div class="logo">SEBIT</div>
+            <div class="subtitle">Light World</div>
+          </div>
 
-      <div class="rightControls">
-        <div class="toggle" aria-label="뷰 전환">
-          <button id="btnTeacherView" class="active" type="button">교사</button>
-          <button id="btnStudentView" type="button">학생</button>
+          <div class="intro-actions">
+            <button class="btn primary" data-go="teacher-login">교사용</button>
+            <button class="btn" data-go="student-login">학생용</button>
+          </div>
+
+          <p class="hint">새로고침/재접속 시 항상 인트로부터 시작합니다.</p>
         </div>
-        <div class="chip" id="whoChip" title="현재 사용자">
-          <div class="avatar" aria-hidden="true">🧑‍🏫</div>
-          <div style="display:flex;flex-direction:column;line-height:1.1">
-            <span style="font-size:12px;opacity:.9;font-weight:900">Teacher View</span>
-            <span style="font-size:13px">담임 선생님</span>
+      </div>
+    </section>
+
+    <!-- TEACHER LOGIN -->
+    <section class="page hidden" data-page="teacher-login" aria-label="교사 로그인">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">교사 로그인</div>
+            <button class="chip" data-go="intro">뒤로</button>
+          </header>
+
+          <div class="grid-two">
+            <div class="panel">
+              <h3>비밀번호</h3>
+              <p class="muted">영어+숫자 조합 비밀번호를 입력하세요.</p>
+              <label class="field">
+                <span>교사 비밀번호</span>
+                <input id="teacherPwInput" type="password" inputmode="text" autocomplete="current-password" placeholder="예: sebit2026"/>
+              </label>
+              <button class="btn primary wide" id="teacherLoginBtn">로그인</button>
+              <div class="error" id="teacherLoginError" aria-live="polite"></div>
+            </div>
+
+            <div class="panel">
+              <h3>안내</h3>
+              <ul class="bullets">
+                <li>비밀번호 변경은 <b>교사 설정</b>에서 처리합니다. (메뉴 파트에서 연결)</li>
+                <li>새로고침하면 인증은 초기화되고 인트로로 돌아갑니다.</li>
+              </ul>
+              <div class="callout">
+                <b>데모 기본 비밀번호</b>: <span class="mono">sebit2026</span><br/>
+                (교사 설정 구현 후 변경 가능)
+              </div>
+            </div>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- STUDENT LOGIN -->
+    <section class="page hidden" data-page="student-login" aria-label="학생 로그인">
+      <div class="safe-center">
+        <div class="student-card">
+          <header class="student-top">
+            <div class="student-title">학생 로그인</div>
+            <button class="chip" data-go="intro">뒤로</button>
+          </header>
+
+          <div class="student-form">
+            <label class="field">
+              <span>ID</span>
+              <input id="studentIdInput" type="text" inputmode="text" autocomplete="off" placeholder="예: S03" maxlength="3"/>
+            </label>
+            <label class="field">
+              <span>PIN</span>
+              <input id="studentPinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="예: 1234" maxlength="6"/>
+            </label>
+            <button class="btn primary wide" id="studentLoginBtn">들어가기</button>
+            <div class="error" id="studentLoginError" aria-live="polite"></div>
+          </div>
+
+          <p class="hint">초기 PIN은 <b>1234</b> 입니다. (개인 페이지에서 변경 가능)</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEACHER HOME -->
+    <section class="page hidden" data-page="teacher-home" aria-label="교사 홈">
+      <!-- Global top-right actions (viewport anchored) -->
+      <div class="teacher-global-actions" id="teacherGlobalActions" aria-label="교사 상단 버튼">
+        <button class="menu-manage-btn" id="menuManageBtn" type="button">메뉴 관리</button>
+        <button class="chip" data-go="intro" id="teacherExitBtn">나가기</button>
+      </div>
+
+      <!-- MENU (관리 진입) : shown from the top-right button -->
+      <div class="menu-dropdown hidden" id="menuDropdown" role="menu" aria-label="관리 메뉴">
+        <button class="menu-item" type="button" data-admin="constitution">세빛 헌법·법령·관리</button>
+        <button class="menu-item" type="button" data-admin="penalty">벌점 기록</button>
+        <button class="menu-item" type="button" data-admin="jobs">직업 관리</button>
+        <button class="menu-item" type="button" data-admin="job-status">직업 수행 현황 관리</button>
+        <button class="menu-item" type="button" data-admin="shop">상점 관리</button>
+        <button class="menu-item" type="button" data-admin="quests">퀘스트 관리</button>
+        <button class="menu-item" type="button" data-admin="bank">세빛 은행</button>
+        <button class="menu-item" type="button" data-admin="teacher-settings">교사 개인 설정</button>
+      </div>
+
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="brandline">
+              <div class="logo-mini">SEBIT</div>
+              <div class="greet" id="teacherGreet">안녕하세요, 선생님!</div>
+              <div class="today-fixed" id="teacherTodayFixed"></div>
+            </div>
+          </header>
+
+
+          <div class="cards3">
+            <!-- Class Status -->
+            <section class="card class-status-card">
+              <header class="card-h">
+                <h2>학급 현황</h2>
+              </header>
+
+              <div class="class-status">
+                <div class="temp-area">
+                  <div class="temp-left">
+                    <div class="temp-value" aria-label="현재 학급 온도">
+                      <span class="temp-num" id="thermoTemp">0</span><span class="temp-unit">°C</span>
+                    </div>
+                    <div class="temp-bar" role="progressbar" aria-label="학급 온도 진행" aria-valuemin="0" aria-valuemax="100" aria-valuenow="23">
+                      <div class="temp-fill" id="thermoTempFill" style="width:0%;"></div>
+                    </div>
+                  </div>
+                  <div class="temp-icon" aria-hidden="true"></div>
+                </div>
+
+                <div class="metric">
+                  <div class="metric-label">아침자습</div>
+                  <div class="metric-bar" role="progressbar" aria-label="아침자습 진행">
+                    <div class="metric-fill" id="morningFill" style="width:0%;"></div>
+                  </div>
+                  <div class="metric-value" id="morningSummary">0 / 24</div>
+                </div>
+
+                <div class="metric">
+                  <div class="metric-label">독서기록</div>
+                  <div class="metric-bar" role="progressbar" aria-label="독서기록 진행">
+                    <div class="metric-fill" id="readingFill" style="width:0%;"></div>
+                  </div>
+                  <div class="metric-value" id="readingSummary">0 / 24</div>
+                </div>
+
+                <div class="enter-area">
+                  <button class="enter-thermo" data-go="teacher-thermometer" aria-label="학급 온도계로 이동">학급 온도계</button>
+                </div>
+
+                <!-- Legacy hook (optional, may be updated by JS) -->
+                <span id="thermoSummary" class="sr-only">0 / 0</span>
+              </div>
+            </section>
+
+            <!-- Class Activity -->
+            <section class="card">
+              <header class="card-h">
+                <h2>우리 반 활동</h2>
+</header>
+
+              <div class="activity-list">
+                <button class="line-item" data-go="teacher-calendar" data-calendar-mode="schedule">
+                  <div class="li-title">오늘 일정</div>
+                  <div class="li-body" id="todaySchedule">등록된 일정이 없습니다.</div>
+                </button>
+                                <button class="line-item" id="openTodayReadingDetailBtn">
+                  <div class="li-title">오늘 독서 로그</div>
+                  <div class="li-body" id="todayReadingLog">기록 없음</div>
+                </button>
+<button class="line-item" data-go="teacher-quests">
+                  <div class="li-title">진행 중 퀘스트</div>
+                  <div class="li-body" id="activeQuests">진행 중 퀘스트가 없습니다.</div>
+                </button>
+                <button class="line-item" data-go="teacher-calendar" data-calendar-mode="meal">
+                  <div class="li-title">오늘 급식</div>
+                  <div class="li-body" id="todayMeal">급식 정보 없음</div>
+                </button>
+              </div>
+
+              <p class="muted small">이 영역에서 직접 수정은 하지 않으며, 각 관리 화면에서 저장하면 즉시 반영됩니다.</p>
+            </section>
+
+            <!-- Quick Links -->
+            <section class="card">
+              <header class="card-h">
+                <h2>개인관리</h2>
+</header>
+
+              <div class="quick3">
+                <button class="btn soft wide" data-go="teacher-activity">활동 기록</button>
+                <button class="btn soft wide" data-go="teacher-calendar" data-calendar-mode="schedule">일정 관리</button>
+                <button class="btn soft wide" data-go="teacher-students">전체 학생 관리</button>
+              </div>
+            </section>
+          </div>
+
+          <footer class="footnote">
+            <span>정적 사이트 · localStorage 저장</span>
+            <span class="dot">•</span>
+            <span>하루 기록은 0시 기준 초기화</span>
+          </footer>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEACHER THERMOMETER -->
+    <section class="page hidden" data-page="teacher-thermometer" aria-label="학급 온도계">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">학급 온도계</div>
+            <div class="top-actions">
+              <button class="chip" id="thermoManageBtn">온도계 관리</button>
+              <button class="chip" data-go="teacher-home">교사 홈</button>
+              <button class="chip" data-go="teacher-home" id="thermoCloseBtn">닫기</button>
+            </div>
+          </header>
+
+          <div class="thermo-layout">
+            <!-- LEFT: STATUS -->
+            <div class="panel thermo-left">
+              <h3>우리 반 온도</h3>
+              <div class="thermo">
+                <div class="thermo-bar"><div class="thermo-fill" id="thermoFill"></div></div>
+                <div class="thermo-meta">
+                  <div><b id="thermoNow">0</b>°C / <span class="muted">100°C</span></div>
+                  <div class="muted small" id="thermoEventMsg"></div>
+                </div>
+              </div>
+
+              <div class="thermo-stages">
+                <div class="muted small">단계(1→5)</div>
+                <div class="stage-list" id="thermoStageList"></div>
+              </div>
+            </div>
+
+            <!-- RIGHT: DONATION WINDOW -->
+            <div class="panel thermo-right">
+              <h3>기부 창</h3>
+              <div class="donation-table-head">
+                <div>기부한 사람</div>
+                <div class="right">금액</div>
+                <div>메세지</div>
+              </div>
+              <div class="donation-window" id="donationWindow"></div>
+            </div>
+
+            <!-- RIGHT-BOTTOM: LOG -->
+            <div class="panel thermo-log">
+              <h3>누가 기록 (최신 50)</h3>
+              <div class="donation-list" id="donationLog"></div>
+              <div class="row">
+                <button class="btn" data-go="student-thermometer">학생 화면에서 보기(샘플)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TEACHER ONLY: DRAWER -->
+          <div class="drawer hidden" id="thermoDrawer" aria-hidden="true">
+            <div class="drawer-card">
+              <header class="drawer-top">
+                <div class="drawer-title">온도계 관리</div>
+                <div class="drawer-actions">
+                  <button class="icon-x" id="thermoDrawerX" aria-label="닫기">✕</button>
+                  <button class="chip" id="thermoDrawerClose">닫기</button>
+                </div>
+              </header>
+
+              <div class="drawer-tabs">
+                <button class="tab active" data-thermo-tab="rewards">보상 설정</button>
+                <button class="tab" data-thermo-tab="grant">보상 지급</button>
+                <button class="tab" data-thermo-tab="reset">온도 초기화</button>
+              </div>
+
+              <div class="drawer-body">
+                <section class="drawer-pane" data-thermo-pane="rewards">
+                  <div class="thermo-admin-grid">
+                    <div class="thermo-admin-preview">
+                      <div class="thermo-admin-head">
+                        <div class="k">현재 온도</div>
+                        <div class="v"><span id="adminThermoNow">0</span>°C</div>
+                      </div>
+                      <div class="thermo-admin-stages" id="adminThermoStageList"></div>
+                      <div class="muted small">표시 순서: 1(아래) → 5(위)</div>
+                    </div>
+
+                    <div class="thermo-admin-form">
+                      <div class="grid-rewards">
+                        <label class="field"><span>20도</span><input id="reward20" type="text" placeholder="보상 내용"/></label>
+                        <label class="field"><span>40도</span><input id="reward40" type="text" placeholder="보상 내용"/></label>
+                        <label class="field"><span>60도</span><input id="reward60" type="text" placeholder="보상 내용"/></label>
+                        <label class="field"><span>80도</span><input id="reward80" type="text" placeholder="보상 내용"/></label>
+                        <label class="field"><span>100도</span><input id="reward100" type="text" placeholder="보상 내용"/></label>
+                      </div>
+                      <div class="row">
+                        <button class="btn soft" id="saveRewardsBtn">반영하기</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="drawer-pane hidden" data-thermo-pane="grant">
+                  <div class="grant-list" id="grantList"></div>
+                </section>
+
+                <section class="drawer-pane hidden" data-thermo-pane="reset">
+                  <p class="muted small">온도/기부/보상상태가 모두 초기화됩니다.</p>
+                  <div class="row">
+                    <button class="btn danger" id="resetThermoBtn">초기화</button>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+<!-- TEACHER QUESTS (skeleton) -->
+    <section class="page hidden" data-page="teacher-quests" aria-label="퀘스트 관리">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">퀘스트 관리</div>
+            <button class="chip" data-go="teacher-home">교사 홈</button>
+          </header>
+
+          <div class="panel">
+            <p class="muted">다음 단계에서 보물상자 카드(주제별) + 종료됨 섹션 + 복사/숨김/삭제/종료 기능을 붙입니다.</p>
+            <div class="callout">
+              지금은 “페이지 전환/저장/배포 안정화”가 목표라서, 퀘스트 UI는 skeleton 상태입니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TEACHER ACTIVITY -->
+    <section class="page hidden" data-page="teacher-activity" aria-label="활동 기록">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">활동 기록</div>
+            <button class="chip" data-go="teacher-home">교사 홈</button>
+          </header>
+
+          <div class="grid-two" id="activityGrid">
+            <div class="panel">
+              <h3>오늘 입력 현황</h3>
+              <div class="muted small" id="activityTodayLabel"></div>
+              <div class="activity-table-wrap" id="activityTableWrap"></div>
+            </div>
+
+            <div class="panel">
+              <h3>안내</h3>
+              <ul class="bullets">
+                <li>아침자습: <b>1회/일</b></li>
+                <li>독서: <b>3회/일</b> (시작쪽/끝쪽)</li>
+                <li>누가 기록: <b>이전 날짜만</b> 열람/삭제</li>
+              </ul>
+              <div class="callout">
+                학생이 입력하면 자동 반영됩니다. (교사 승인 없음)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODAL: ACTIVITY HISTORY (독서 누가기록) -->
+    <div class="modal hidden" id="activityHistoryModal" role="dialog" aria-modal="true" aria-label="독서 누가기록">
+      <div class="modal-card">
+        <header class="modal-top">
+          <div class="modal-title" id="activityHistoryTitle">독서 누가기록</div>
+          <button class="chip" id="closeActivityHistoryBtn">닫기</button>
+        </header>
+        <div class="activity-history" id="activityHistoryBody"></div>
+      </div>
+    
+<!-- MODAL: TODAY READING DETAIL (학생별 오늘 독서 1~3건) -->
+<div class="modal hidden" id="todayReadingDetailModal" role="dialog" aria-modal="true" aria-label="오늘 독서 자세히 보기">
+  <div class="modal-card wide">
+    <header class="modal-top">
+      <div class="modal-title">오늘 독서 자세히 보기</div>
+      <button class="chip" id="closeTodayReadingDetailBtn">닫기</button>
     </header>
+    <div class="activity-history" id="todayReadingDetailBody"></div>
+  </div>
+</div>
 
-    <main class="panel">
-      <div class="panelHeader">
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <h1 id="pageTitle">교사용 대시보드</h1>
-          <div class="date" id="dateLine">오늘 · —</div>
-        </div>
-        <div class="btnRow">
-          <button class="btn small" type="button" id="btnResetPeriod" title="2주 초기화(데모)">🔄 기간 초기화</button>
-          <button class="btn small primary" type="button" id="btnAward" title="모범시민상 지급(데모)">🏅 모범시민상 지급</button>
-        </div>
-      </div>
+</div>
 
-      <div class="panelBody">
-        <!-- Teacher nav -->
-        <nav class="sidenav" id="teacherNav">
-          <div class="navTitle">교사용 메뉴 <span class="mini">SEBIT</span></div>
-          <button class="navBtn active" data-page="t-home" type="button"><span class="i">🏠</span> 대시보드</button>
-          <button class="navBtn" data-page="t-students" type="button"><span class="i">👥</span> 학생 관리</button>
-          <button class="navBtn" data-page="t-roles" type="button"><span class="i">🎒</span> 직업 부여</button>
-          <button class="navBtn" data-page="t-store" type="button"><span class="i">🏪</span> 빛의 상점</button>
-          <button class="navBtn" data-page="t-constitution" type="button"><span class="i">⚖️</span> 세빛 헌법</button>
-          <button class="navBtn" data-page="t-alerts" type="button"><span class="i">🔔</span> 알림/재고</button>
+    <!-- TEACHER CALENDAR (skeleton) -->
+    <section class="page hidden" data-page="teacher-calendar" aria-label="일정 관리">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">일정 관리</div>
+            <button class="chip" data-go="teacher-home">교사 홈</button>
+          </header>
 
-          <div class="navHint">
-            • 이 파일은 <b>데모/시안</b>입니다.<br/>
-            • 버튼 클릭으로 화면이 전환됩니다.<br/>
-            • 저장/서버 연동은 다음 단계에서 붙이면 됩니다.
-          </div>
-        </nav>
-
-        <!-- Student nav (hidden by default) -->
-        <nav class="sidenav" id="studentNav" style="display:none">
-          <div class="navTitle">학생 메뉴 <span class="mini">Light World</span></div>
-          <button class="navBtn active" data-page="s-home" type="button"><span class="i">📜</span> 오늘의 나</button>
-          <button class="navBtn" data-page="s-store" type="button"><span class="i">🏪</span> 빛의 상점</button>
-          <button class="navBtn" data-page="s-role" type="button"><span class="i">🎒</span> 나의 역할</button>
-          <button class="navBtn" data-page="s-constitution" type="button"><span class="i">⚖️</span> 세빛 헌법</button>
-          <div class="navHint">
-            학생 화면은 “한 페이지 안에서” 핵심 정보를 확인하도록 구성했습니다.
-          </div>
-        </nav>
-
-        <!-- Content -->
-        <section class="content" id="contentArea">
-          <!-- Teacher pages -->
-          <div class="page" id="t-home">
-            <div class="grid">
-              <div class="card" style="grid-column:span 12">
-                <div class="cardHeader">
-                  <div class="t">🌟 오늘의 학급 한눈에</div>
-                  <span class="pill" id="periodPill">기간: D-10</span>
-                </div>
-                <div class="threeCol">
-                  <div class="row"><span>학생 수</span><b id="statStudents">24명</b></div>
-                  <div class="row"><span>총 루멘(보유)</span><b id="statLumens">—</b></div>
-                  <div class="row"><span>오늘 아침자습 제출</span><b id="statMorning">—</b></div>
-                </div>
-                <div class="twoCol" style="margin-top:12px">
-                  <div class="card" style="grid-column:auto;margin:0">
-                    <div class="cardHeader">
-                      <div class="t">🎯 오늘의 핵심 작업</div>
-                    </div>
-                    <ul class="mini" style="margin:0;padding-left:18px;line-height:1.6">
-                      <li>직업 활동 기록 확인(빛의 파수꾼/테크 키퍼 등)</li>
-                      <li>상점 재고 부족 알림 확인</li>
-                      <li>모범시민상 지급(기간 종료 시)</li>
-                    </ul>
-                    <div class="btnRow" style="margin-top:10px">
-                      <button class="btn small primary" type="button" onclick="go('t-students')">👥 학생 관리로</button>
-                      <button class="btn small" type="button" onclick="go('t-store')">🏪 상점 관리로</button>
-                    </div>
-                  </div>
-                  <div class="card" style="grid-column:auto;margin:0">
-                    <div class="cardHeader">
-                      <div class="t">💡 XP 규칙(요약)</div>
-                      <span class="pill">+5 XP</span>
-                    </div>
-                    <div class="row"><span>일반 과제 성공</span><b>+5 XP</b></div>
-                    <div class="row"><span>하루 권장 최대</span><b>20 XP</b></div>
-                    <div class="row"><span>레벨업(권장)</span><b>100 XP 단위</b></div>
-                    <div class="mini" style="margin-top:8px">
-                      XP는 “깎지 않고 누적”하는 것을 권장합니다. 벌은 루멘/벌점에서 처리해요.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="card" style="grid-column:span 6">
-                <div class="cardHeader">
-                  <div class="t">🏪 빛의 상점 상태</div>
-                  <span class="pill" id="storeLowPill">부족 0</span>
-                </div>
-                <div id="storePreview" class="mini">재고를 불러오는 중…</div>
-                <div class="btnRow" style="margin-top:10px">
-                  <button class="btn small" type="button" onclick="go('t-alerts')">🔔 재고 알림</button>
-                  <button class="btn small primary" type="button" onclick="go('t-store')">상점 관리</button>
-                </div>
-              </div>
-
-              <div class="card" style="grid-column:span 6">
-                <div class="cardHeader">
-                  <div class="t">⚖️ 세빛 헌법 빠른 편집</div>
-                </div>
-                <div class="mini">아이들이 자주 보는 규칙은 “짧고 구체적으로” 유지하는 게 좋아요.</div>
-                <div class="btnRow" style="margin-top:10px">
-                  <button class="btn small primary" type="button" onclick="go('t-constitution')">헌법 탭 열기</button>
-                  <button class="btn small" type="button" onclick="toast('포스터 보기(데모)')">포스터 보기</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="t-students" style="display:none">
-            <div class="card">
-              <div class="cardHeader">
-                <div class="t">👥 학생 관리</div>
-                <span class="pill">루멘 · XP · 벌점</span>
-              </div>
-              <div class="twoCol">
-                <div>
-                  <label class="mini">검색</label>
-                  <input type="text" id="studentSearch" placeholder="이름 검색 (예: 김)" />
-                </div>
-                <div>
-                  <label class="mini">학생 선택(데모)</label>
-                  <select id="studentSelect"></select>
-                </div>
-              </div>
-
-              <table class="table" id="studentsTable" aria-label="학생 목록">
-                <thead>
-                  <tr>
-                    <th style="width:36%">학생</th>
-                    <th>직업</th>
-                    <th>루멘</th>
-                    <th>XP</th>
-                    <th>Lv</th>
-                    <th>벌점(기간)</th>
-                    <th>아침자습</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-
-              <div class="btnRow" style="margin-top:12px">
-                <button class="btn small" type="button" onclick="toast('학생 상세(데모)')">학생 상세 보기</button>
-                <button class="btn small primary" type="button" onclick="toast('루멘/XP 일괄 지급(데모)')">일괄 지급</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="t-roles" style="display:none">
-            <div class="card">
-              <div class="cardHeader">
-                <div class="t">🎒 직업 부여</div>
-                <span class="pill">본인 제외 자동 배정(개념)</span>
-              </div>
-              <div class="mini">
-                • 직업은 2주마다 초기화(권장).<br/>
-                • 학습 체크단/정리 마스터는 담당 학생만 체크하도록 “자동 배정” 설계가 가능합니다(개발 단계에서 적용).
-              </div>
-
-              <div class="twoCol" style="margin-top:10px">
-                <div>
-                  <label class="mini">선택 학생</label>
-                  <select id="roleStudentSelect"></select>
-                </div>
-                <div>
-                  <label class="mini">직업 선택</label>
-                  <select id="roleSelect"></select>
-                </div>
-              </div>
-
-              <div class="btnRow" style="margin-top:12px">
-                <button class="btn small primary" type="button" id="btnAssignRole">직업 부여</button>
-                <button class="btn small" type="button" id="btnClearRoles">직업 전체 초기화(데모)</button>
-              </div>
-
-              <table class="table" id="rolesTable" aria-label="직업 현황">
-                <thead>
-                  <tr>
-                    <th style="width:40%">학생</th>
-                    <th>직업</th>
-                    <th>기간</th>
-                    <th>메모(교사)</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="page" id="t-store" style="display:none">
-            <div class="card">
-              <div class="cardHeader">
-                <div class="t">🏪 빛의 상점(교사용)</div>
-                <span class="pill">단위: 루멘</span>
-              </div>
-              <div class="twoCol">
-                <div>
-                  <label class="mini">상품 추가(데모)</label>
-                  <input id="newItemName" type="text" placeholder="예: 학급 쿠폰 / 마이쮸 / 쿠키" />
-                </div>
-                <div class="twoCol" style="gap:10px">
-                  <div>
-                    <label class="mini">가격(루멘)</label>
-                    <input id="newItemPrice" type="number" min="0" value="50" />
-                  </div>
-                  <div>
-                    <label class="mini">재고</label>
-                    <input id="newItemQty" type="number" min="0" value="10" />
-                  </div>
-                </div>
-              </div>
-              <div class="btnRow" style="margin-top:12px">
-                <button class="btn small primary" type="button" id="btnAddItem">상품 추가</button>
-                <button class="btn small" type="button" onclick="toast('학생 구매 화면(데모)')">학생 구매 화면 보기</button>
-              </div>
-
-              <table class="table" id="storeTable" aria-label="상점 상품 목록">
-                <thead>
-                  <tr>
-                    <th style="width:36%">상품</th>
-                    <th>가격(루멘)</th>
-                    <th>재고</th>
-                    <th style="width:28%">재고 조정</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-
-              <div class="mini" style="margin-top:10px">
-                • “재고 부족 알림”은 재고가 임계치(기본 3개) 이하일 때 표시됩니다.
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="t-constitution" style="display:none">
-            <div class="card">
-              <div class="cardHeader">
-                <div class="t">⚖️ 세빛 헌법(교사용 편집)</div>
-                <span class="pill">학생은 읽기 전용</span>
-              </div>
-
-              <div class="mini">
-                • 제목은 유지, 내용은 아이용으로 “짧고 구체적으로” 작성하는 방식이 안정적입니다.<br/>
-                • 학생 화면에서는 “그룹별 아이콘 포스터” 형태로 보이게 할 수 있습니다(개발/디자인 확장).
-              </div>
-
-              <div class="twoCol" style="margin-top:10px">
-                <div>
-                  <label class="mini">빠른 템플릿</label>
-                  <select id="constitutionTemplate">
-                    <option value="default">기본(24조) 요약</option>
-                    <option value="short">더 짧게(아이용 초간단)</option>
-                  </select>
-                </div>
-                <div class="btnRow" style="align-items:end">
-                  <button class="btn small" type="button" id="btnLoadTemplate">불러오기</button>
-                  <button class="btn small primary" type="button" id="btnSaveConstitution">저장</button>
-                </div>
-              </div>
-
-              <label class="mini" style="display:block;margin-top:10px">헌법 내용(학생 공개용)</label>
-              <textarea id="constitutionText"></textarea>
-
-              <div class="row" style="margin-top:10px">
-                <span>학생 화면 반영 상태</span>
-                <b id="constitutionStatus" class="ok">저장됨</b>
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="t-alerts" style="display:none">
-            <div class="card">
-              <div class="cardHeader">
-                <div class="t">🔔 알림 / 재고 부족</div>
-                <span class="pill" id="alertCountPill">0</span>
-              </div>
-              <div id="alertsList" class="mini">알림을 불러오는 중…</div>
-              <div class="btnRow" style="margin-top:12px">
-                <button class="btn small" type="button" onclick="go('t-store')">🏪 상점으로</button>
-                <button class="btn small primary" type="button" onclick="toast('알림 확인 처리(데모)')">확인 처리</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Student pages (same file, same design tone) -->
-          <div class="page" id="s-home" style="display:none">
-            <div class="studentPanel">
-              <div class="studentTop">
-                <div style="display:flex;flex-direction:column;gap:2px">
-                  <h2 class="h">오늘의 활동 현황</h2>
-                  <div class="mini">학생 view · 한 페이지에서 확인해요</div>
-                </div>
-                <button class="x" type="button" onclick="toast('닫기(데모)')">✕</button>
-              </div>
-
-              <div class="studentGrid">
-                <div class="studentCard">
-                  <div class="studentIcon" aria-hidden="true">🛡️</div>
-                  <div style="flex:1;min-width:0">
-                    <div class="studentTitle">나의 직업 <span class="pill" id="sRolePill">빛의 파수꾼</span></div>
-                    <div class="muted" style="font-size:13px;line-height:1.35">오늘의 임무를 확인하고 활동 기록을 남겨요.</div>
-                    <ul class="mini" style="margin:8px 0 0;padding-left:18px;line-height:1.6">
-                      <li id="sQuestLine">교실 앞 정리 점검</li>
-                    </ul>
-                    <div class="btnRow" style="margin-top:10px">
-                      <button class="btn small primary" type="button" onclick="toast('직업 활동 페이지(데모)')">활동하러 가기 →</button>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="studentCard">
-                  <div class="studentIcon" aria-hidden="true">⭐</div>
-                  <div style="flex:1;min-width:0">
-                    <div class="studentTitle">나의 별(루멘) · 성장</div>
-                    <div class="row" style="margin-top:6px"><span>보유 루멘</span><b><span id="sLumens">1,240</span> <span class="warn">루멘</span></b></div>
-                    <div class="row"><span>경험치</span><b>Lv.<span id="sLevel">3</span> · <span class="mini">일반 과제 +5 XP</span></b></div>
-                    <div class="row"><span>벌점 현황</span><b class="ok" id="sDemerit">이번 기간 0점 · 모범시민 진행 중!</b></div>
-                  </div>
-                </div>
-
-                <div class="studentCard">
-                  <div class="studentIcon" aria-hidden="true">🏦</div>
-                  <div style="flex:1;min-width:0">
-                    <div class="studentTitle">세빛 은행 · 목표 도전</div>
-                    <div class="row" style="margin-top:6px"><span>저금 중</span><b><span id="sSavings">1,000</span> 루멘</b></div>
-                    <div class="row"><span>이자까지</span><b id="sInterest">D-3</b></div>
-                    <div class="row"><span>목표 도전</span><b id="sInvest">수학 도전 진행 중 · 300 루멘</b></div>
-                  </div>
-                </div>
-
-                <div class="studentCard">
-                  <div class="studentIcon" aria-hidden="true">📘</div>
-                  <div style="flex:1;min-width:0">
-                    <div class="studentTitle">오늘의 아침자습</div>
-                    <div class="row" style="margin-top:6px"><span>제출 상태</span><b class="ok" id="sMorning">제출 완료 ✅</b></div>
-                    <div class="mini" style="margin-top:8px">아침자습은 오늘만 표시돼요.</div>
-                  </div>
-                </div>
-
-                <div class="shortcuts" aria-label="바로가기">
-                  <button class="shortcutBtn" type="button" onclick="go('s-store')">🏪 빛의 상점 가기</button>
-                  <button class="shortcutBtn" type="button" onclick="go('s-role')">🎒 나의 역할 보기</button>
-                  <button class="shortcutBtn" type="button" onclick="go('s-constitution')">⚖️ 세빛 헌법 보기</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="s-store" style="display:none">
-            <div class="studentPanel">
-              <div class="studentTop">
-                <div style="display:flex;flex-direction:column;gap:2px">
-                  <h2 class="h">🏪 빛의 상점</h2>
-                  <div class="mini">학생 view · 가격 단위: 루멘</div>
-                </div>
-                <button class="x" type="button" onclick="go('s-home')">←</button>
-              </div>
-              <div class="mini">구매(차감/재고)는 실제 구현 단계에서 연결됩니다. 지금은 목록 확인용이에요.</div>
-              <table class="table" id="sStoreTable" aria-label="학생 상점 목록">
-                <thead>
-                  <tr>
-                    <th>상품</th>
-                    <th>가격(루멘)</th>
-                    <th>남은 수량</th>
-                    <th style="width:120px">구매</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-              <div class="btnRow" style="margin-top:12px">
-                <button class="btn small" type="button" onclick="go('s-home')">닫기</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="s-role" style="display:none">
-            <div class="studentPanel">
-              <div class="studentTop">
-                <div style="display:flex;flex-direction:column;gap:2px">
-                  <h2 class="h">🎒 나의 역할</h2>
-                  <div class="mini">학생 view · 오늘 해야 할 일을 확인해요</div>
-                </div>
-                <button class="x" type="button" onclick="go('s-home')">←</button>
-              </div>
-
-              <div class="studentCard">
-                <div class="studentIcon" aria-hidden="true">🛡️</div>
-                <div style="flex:1;min-width:0">
-                  <div class="studentTitle">현재 직업 <span class="pill" id="sRolePill2">빛의 파수꾼</span></div>
-                  <div class="mini">해야 할 일(교사가 수정 가능)</div>
-                  <div class="row"><span>오늘 할 일</span><b id="sTodo">교실 앞 정리 점검</b></div>
-                  <div class="row"><span>기간</span><b id="sRolePeriod">2주 · 초기화 D-10</b></div>
-                </div>
-              </div>
-
-              <div class="btnRow" style="margin-top:12px">
-                <button class="btn small primary" type="button" onclick="toast('직업 활동 기록(데모)')">오늘 활동 기록하기</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="page" id="s-constitution" style="display:none">
-            <div class="studentPanel">
-              <div class="studentTop">
-                <div style="display:flex;flex-direction:column;gap:2px">
-                  <h2 class="h">⚖️ 세빛 헌법</h2>
-                  <div class="mini">학생 view · 규칙을 스스로 확인해요</div>
-                </div>
-                <button class="x" type="button" onclick="go('s-home')">←</button>
-              </div>
-              <div class="mini">그룹별로 읽기 쉽게 구성(포스터 확장 가능). 아래는 텍스트 버전(데모)입니다.</div>
-              <textarea id="sConstitutionText" readonly style="margin-top:10px"></textarea>
-            </div>
-          </div>
-
-        </section>
-      </div>
-
-      <div class="toast" id="toast" aria-live="polite"></div>
-    </main>
+          <div class="calendar-wrap">
+  <div class="calendar-left panel">
+    <div class="cal-top">
+      <button class="btn soft small" id="calPrev">◀</button>
+      <div class="cal-month" id="calMonthLabel">-</div>
+      <button class="btn soft small" id="calNext">▶</button>
+    </div>
+    <div class="cal-week">
+      <div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div>
+    </div>
+    <div class="cal-grid" id="calGrid" aria-label="달력"></div>
+    <div class="callout small">날짜 선택 → 오른쪽에서 일정 추가/삭제</div>
   </div>
 
-  <script>
-    /***********************
-     * DEMO DATA (editable)
-     ************************/
-    const roles = [
-      "빛의 파수꾼(앞 청소)", "빛의 파수꾼(뒤 청소)",
-      "작품 큐레이터", "그린 세이퍼",
-      "상점 운영", "교실 레인저", "페어 저스티스",
-      "테크 키퍼", "문서 매니저",
-      "사물함 & 서랍 마스터", "학습 체크단",
-      "타임 키퍼", "런치 세이퍼", "웨더 캐스터"
-    ];
+  <div class="calendar-right panel">
+    <div class="cal-sel">선택 날짜: <b id="calSelectedDate">-</b></div>
 
-    const questsByRole = {
-      "빛의 파수꾼(앞 청소)": "교실 앞 정리 점검",
-      "빛의 파수꾼(뒤 청소)": "교실 뒤 정리 점검",
-      "작품 큐레이터": "전시 상태 확인 & 정리/재전시",
-      "그린 세이퍼": "휴지통/분리수거함 정리 & 배출 확인",
-      "상점 운영": "구입 내역 확인 & 지급 체크",
-      "교실 레인저": "규칙 기록(행동 중심) 체크",
-      "페어 저스티스": "공정성 점검 & 보복 금지",
-      "테크 키퍼": "패드 반납 점검(4교시 전/일과 후)",
-      "문서 매니저": "필요 시 문서 전달 기록",
-      "사물함 & 서랍 마스터": "사물함/서랍 정리 점검",
-      "학습 체크단": "필통 검사(연필3·지우개1)",
-      "타임 키퍼": "출석 체크(8:45/9:00)",
-      "런치 세이퍼": "급식 예절(문제 있을 때만 체크)",
-      "웨더 캐스터": "미세먼지/내일 날씨 알림"
-    };
+    <div class="cal-form">
+      <input class="input" id="calTitle" placeholder="일정 제목" maxlength="40" />
+      <input class="input" id="calDesc" placeholder="설명(1줄)" maxlength="80" />
+      <div class="row" style="gap:8px;">
+        <button class="btn primary" id="calAddBtn" style="flex:1;">추가</button>
+        <button class="btn soft" id="calCancelBtn" style="display:none;">취소</button>
+      </div>
+    </div>
 
-    const demoStudents = [
-      "김가은","김도윤","김서준","김하윤","김지우","김지민",
-      "박민준","박서연","박지호","배서아","서예린","송도현",
-      "신유나","안지후","오하린","유민재","이서아","이준호",
-      "임서윤","정하준","최가온","최서윤","한도윤","홍지아"
-    ].map((name, idx)=>({
-      id: "S"+String(idx+1).padStart(2,"0"),
-      name,
-      avatar: ["🐧","🐻‍❄️","🦉","🦊","🐰","🐼"][idx%6],
-      role: roles[idx % roles.length],
-      lumens: 900 + (idx*35)%600,
-      xp: 60 + (idx*12)%140,
-      level: 1 + Math.floor((60 + (idx*12)%140)/100),
-      demerit: (idx%9===0)? 1 : 0,
-      morning: (idx%7===0)? "미제출" : "완료"
-    }));
+    <div class="cal-undo" id="calUndoBar" style="display:none;">
+      <span class="muted small" id="calUndoText">삭제됨</span>
+      <button class="btn soft small" id="calUndoBtn">복원</button>
+    </div>
 
-    let store = [
-      {id:"I01", name:"학급 쿠폰", price:120, qty:8},
-      {id:"I02", name:"마이쮸", price:50, qty:16},
-      {id:"I03", name:"쿠키", price:60, qty:12},
-      {id:"I04", name:"학용품(연필)", price:80, qty:6}
-    ];
+    <div class="cal-list" id="calEventList"></div>
 
-    const constitutionTemplates = {
-      default: `⚖️ 세빛 헌법 (아이용 요약)
-[기본 생활]
-- 시간 준수: 종이 치면 바로 자리에 앉아요.
-- 수업 방해 금지: 쓸데없는 말/행동으로 방해하지 않아요.
-- 준비물 관리: 필요한 물건을 챙겨요.
-- 허락 없는 이동 금지: 돌아다니지 않아요.
+    <hr class="sep" />
 
-[말과 태도]
-- 무시 표현 금지: “그게 뭐야?” 같은 말을 하지 않아요.
-- 비웃음 금지: 친구 실수/외모로 웃지 않아요.
-- 눈치 주기 금지: 한숨/눈굴리기 등으로 불편하게 하지 않아요.
-- 일부러 빼기 금지: “너는 안 껴” 금지.
+    <div class="meal-box">
+      <div class="meal-top">오늘의 급식 (<span id="mealDate">-</span>)</div>
+      <textarea class="textarea" id="mealText" rows="6" placeholder="한 줄에 1개 항목"></textarea>
+      <div class="meal-actions">
+        <button class="btn soft" id="mealSaveBtn">저장</button>
+        <button class="btn soft" id="mealClearBtn">비우기</button>
+      </div>
+      <div class="muted tiny">급식은 다음날 0시 자동 삭제</div>
+    </div>
+  </div>
+</div>
 
-[친구 관계]
-- 뒷말·소문 금지: 없는 자리에서 나쁘게 말하지 않아요.
-- 장난은 싫다고 하면 멈춰요.
-- 물건 장난 금지: 숨기거나 망가뜨리지 않아요.
+        </div>
+      </div>
+    </section>
 
-[기기·공동체]
-- 허락 없이 패드 사용 금지.
-- 쓰레기 방치 금지, 급식 장난 금지.
-- 역할 수행 친구 방해 금지.
+    <!-- TEACHER STUDENTS -->
+    <section class="page hidden" data-page="teacher-students" aria-label="전체 학생 관리">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">전체 학생 관리</div>
+            <div class="right">
+              <button class="chip" data-go="teacher-home">교사 홈</button>
+            </div>
+          </header>
 
-[보호 규칙]
-- 보복 금지.
-- 본 것/확인한 것만 기록해요.`,
-      short: `⚖️ 세빛 헌법 (초간단)
-1) 수업을 방해하지 않아요.
-2) 친구를 무시하거나 비웃지 않아요.
-3) 일부러 빼지 않아요.
-4) 남의 물건을 함부로 하지 않아요.
-5) 허락 없이 패드를 쓰지 않아요.
-6) 쓰레기를 버리고 정리해요.
-7) 보복하지 않아요.`
-    };
-
-    /***********************
-     * SIMPLE APP STATE
-     ************************/
-    const state = {
-      view: "teacher",               // teacher | student
-      teacherPage: "t-home",
-      studentPage: "s-home",
-      selectedStudentId: demoStudents[0].id,
-      periodDaysLeft: 10,
-      constitution: constitutionTemplates.default
-    };
-
-    /***********************
-     * HELPERS
-     ************************/
-    const $ = (sel, root=document)=>root.querySelector(sel);
-    const $$ = (sel, root=document)=>Array.from(root.querySelectorAll(sel));
-
-    function todayKorean(){
-      const d = new Date();
-      const days = ["일","월","화","수","목","금","토"];
-      return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;
-    }
-
-    function toast(msg){
-      const t = $("#toast");
-      t.textContent = msg;
-      t.classList.add("show");
-      clearTimeout(t._t);
-      t._t = setTimeout(()=>t.classList.remove("show"), 1200);
-    }
-
-    function setActiveNav(navRoot, pageId){
-      $$(".navBtn", navRoot).forEach(b=>{
-        b.classList.toggle("active", b.dataset.page===pageId);
-      });
-    }
-
-    function showPage(pageId){
-      $$(".page", $("#contentArea")).forEach(p=>p.style.display = (p.id===pageId) ? "" : "none");
-    }
-
-    function go(pageId){
-      if(pageId.startsWith("t-")){
-        state.teacherPage = pageId;
-        setActiveNav($("#teacherNav"), pageId);
-        showPage(pageId);
-        $("#pageTitle").textContent = ({
-          "t-home":"교사용 대시보드",
-          "t-students":"학생 관리",
-          "t-roles":"직업 부여",
-          "t-store":"빛의 상점(교사용)",
-          "t-constitution":"세빛 헌법(교사용)",
-          "t-alerts":"알림/재고"
-        })[pageId] || "교사용";
-        toast("교사용 화면 전환");
-      }else{
-        state.studentPage = pageId;
-        setActiveNav($("#studentNav"), pageId);
-        showPage(pageId);
-        $("#pageTitle").textContent = ({
-          "s-home":"학생 메인",
-          "s-store":"빛의 상점(학생)",
-          "s-role":"나의 역할",
-          "s-constitution":"세빛 헌법(학생)"
-        })[pageId] || "학생";
-        toast("학생 화면 전환");
-      }
-      render();
-    }
-
-    function setView(view){
-      state.view = view;
-      const isTeacher = view==="teacher";
-      $("#btnTeacherView").classList.toggle("active", isTeacher);
-      $("#btnStudentView").classList.toggle("active", !isTeacher);
-
-      $("#teacherNav").style.display = isTeacher ? "" : "none";
-      $("#studentNav").style.display = isTeacher ? "none" : "";
-
-      // Header chip
-      const chip = $("#whoChip");
-      if(isTeacher){
-        chip.innerHTML = `
-          <div class="avatar" aria-hidden="true">🧑‍🏫</div>
-          <div style="display:flex;flex-direction:column;line-height:1.1">
-            <span style="font-size:12px;opacity:.9;font-weight:900">Teacher View</span>
-            <span style="font-size:13px">담임 선생님</span>
-          </div>`;
-        go(state.teacherPage);
-      }else{
-        const s = demoStudents.find(x=>x.id===state.selectedStudentId) || demoStudents[0];
-        chip.innerHTML = `
-          <div class="avatar" aria-hidden="true">${s.avatar}</div>
-          <div style="display:flex;flex-direction:column;line-height:1.1">
-            <span style="font-size:12px;opacity:.9;font-weight:900">Student View</span>
-            <span style="font-size:13px">${s.name}</span>
-          </div>`;
-        go(state.studentPage);
-      }
-    }
-
-    /***********************
-     * RENDERERS
-     ************************/
-    function renderTopStats(){
-      $("#dateLine").textContent = `오늘 · ${todayKorean()}`;
-      $("#periodPill").textContent = `기간: D-${state.periodDaysLeft}`;
-      const totalLumens = demoStudents.reduce((a,s)=>a+s.lumens,0);
-      const morningDone = demoStudents.filter(s=>s.morning==="완료").length;
-      $("#statLumens").textContent = `${totalLumens.toLocaleString()} 루멘`;
-      $("#statMorning").textContent = `${morningDone} / ${demoStudents.length}`;
-      $("#statStudents").textContent = `${demoStudents.length}명`;
-    }
-
-    function renderStudentsTable(){
-      const q = ($("#studentSearch").value || "").trim();
-      const list = q ? demoStudents.filter(s=>s.name.includes(q)) : demoStudents;
-      const tbody = $("#studentsTable tbody");
-      tbody.innerHTML = list.map(s=>`
-        <tr>
-          <td><b>${s.avatar} ${s.name}</b><div class="mini">${s.id}</div></td>
-          <td>${s.role}</td>
-          <td><b>${s.lumens}</b></td>
-          <td>${s.xp}</td>
-          <td>Lv.${s.level}</td>
-          <td>${s.demerit}</td>
-          <td>${s.morning==="완료" ? '<span class="ok">완료</span>' : '<span class="bad">미제출</span>'}</td>
-        </tr>
-      `).join("");
-    }
-
-    function renderSelects(){
-      // student selects
-      const sel = $("#studentSelect");
-      const sel2 = $("#roleStudentSelect");
-      sel.innerHTML = demoStudents.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
-      sel2.innerHTML = demoStudents.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
-      sel.value = state.selectedStudentId;
-      sel2.value = state.selectedStudentId;
-
-      // roles select
-      const rsel = $("#roleSelect");
-      rsel.innerHTML = roles.map(r=>`<option value="${r}">${r}</option>`).join("");
-      const s = demoStudents.find(x=>x.id===state.selectedStudentId) || demoStudents[0];
-      rsel.value = s.role;
-    }
-
-    function renderRolesTable(){
-      const tbody = $("#rolesTable tbody");
-      tbody.innerHTML = demoStudents.map(s=>`
-        <tr>
-          <td><b>${s.avatar} ${s.name}</b><div class="mini">${s.id}</div></td>
-          <td>${s.role}</td>
-          <td>2주 · 초기화 D-${state.periodDaysLeft}</td>
-          <td class="mini">오늘 할 일: ${questsByRole[s.role] || "—"}</td>
-        </tr>
-      `).join("");
-    }
-
-    function renderStore(){
-      // teacher store table
-      const tbody = $("#storeTable tbody");
-      tbody.innerHTML = store.map(item=>{
-        const low = item.qty <= 3;
-        return `
-          <tr>
-            <td><b>${item.name}</b><div class="mini">${item.id}</div></td>
-            <td>${item.price}</td>
-            <td>${low ? `<span class="bad">${item.qty} (부족)</span>` : item.qty}</td>
-            <td>
-              <div class="btnRow">
-                <button class="btn small" type="button" onclick="adjQty('${item.id}',-1)">-1</button>
-                <button class="btn small" type="button" onclick="adjQty('${item.id}',+1)">+1</button>
-                <button class="btn small primary" type="button" onclick="restock('${item.id}')">채우기</button>
+          <!-- top bulk bar -->
+          <div class="stud-admin-topbar" id="studAdminTopbar">
+            <div class="stud-admin-left">
+              <div class="stud-toggle" role="tablist" aria-label="지급 대상">
+                <button class="stud-toggle-btn active" id="studModeLumen" type="button">루멘</button>
+                <button class="stud-toggle-btn" id="studModeXp" type="button">XP</button>
               </div>
-            </td>
-          </tr>
-        `;
-      }).join("");
+              <div class="stud-ops">
+                <button class="btn soft small" type="button" data-bulk="+10">+10</button>
+                <button class="btn soft small" type="button" data-bulk="+5">+5</button>
+                <input class="input stud-direct" id="studDirectPlus" type="number" inputmode="numeric" placeholder="직접 +" />
 
-      // preview on dashboard
-      const lowCount = store.filter(x=>x.qty<=3).length;
-      $("#storeLowPill").textContent = `부족 ${lowCount}`;
-      $("#storePreview").innerHTML = store.slice(0,4).map(x=>{
-        const tag = x.qty<=3 ? `<span class="bad">부족</span>` : `<span class="ok">정상</span>`;
-        return `• ${x.name} (${x.qty}) ${tag}`;
-      }).join("<br/>");
+                <div class="stud-sep"></div>
 
-      // alerts page
-      $("#alertCountPill").textContent = `${lowCount}`;
-      $("#alertCountPill").className = "pill";
-      $("#alertsList").innerHTML = lowCount===0
-        ? `<span class="ok">현재 재고 부족 알림이 없어요.</span>`
-        : store.filter(x=>x.qty<=3).map(x=>`• <b>${x.name}</b> 재고가 ${x.qty}개 남았어요. (임계치 3)`).join("<br/>");
+                <button class="btn soft small" type="button" data-bulk="-10">-10</button>
+                <button class="btn soft small" type="button" data-bulk="-5">-5</button>
+                <input class="input stud-direct" id="studDirectMinus" type="number" inputmode="numeric" placeholder="직접 -" />
+              </div>
+            </div>
 
-      // student store table
-      const sbody = $("#sStoreTable tbody");
-      sbody.innerHTML = store.map(x=>`
-        <tr>
-          <td><b>${x.name}</b></td>
-          <td>${x.price}</td>
-          <td>${x.qty<=0 ? '<span class="bad">품절</span>' : x.qty}</td>
-          <td><button class="btn small ${x.qty<=0?'danger':''}" type="button" onclick="toast('구매(데모)')">${x.qty<=0?'불가':'구매'}</button></td>
-        </tr>
-      `).join("");
-    }
+            <div class="stud-admin-right">
+              <button class="btn soft small" type="button" id="studSelectAllBtn">전체선택</button>
+              <button class="btn soft small" type="button" id="studSelectNoneBtn">선택해제</button>
+              <button class="btn primary" type="button" id="studGiveBtn">점수 주기</button>
+            </div>
+          </div>
 
-    function renderConstitution(){
-      $("#constitutionText").value = state.constitution;
-      $("#sConstitutionText").value = state.constitution;
-      $("#constitutionStatus").textContent = "저장됨";
-      $("#constitutionStatus").className = "ok";
-    }
+          <div class="stud-undo" id="studUndoBar" style="display:none;">
+            <span class="muted small" id="studUndoText">지급됨</span>
+            <button class="btn soft small" id="studUndoBtn" type="button">되돌리기</button>
+          </div>
 
-    function renderStudentHome(){
-      const s = demoStudents.find(x=>x.id===state.selectedStudentId) || demoStudents[0];
-      // student pills/lines
-      $("#sRolePill").textContent = s.role.includes("빛의 파수꾼") ? "빛의 파수꾼" : s.role;
-      $("#sRolePill2").textContent = $("#sRolePill").textContent;
-      $("#sQuestLine").textContent = questsByRole[s.role] || "오늘 할 일이 설정되지 않았어요.";
-      $("#sLumens").textContent = s.lumens.toLocaleString();
-      $("#sLevel").textContent = s.level;
-      $("#sDemerit").textContent = s.demerit===0 ? "이번 기간 0점 · 모범시민 진행 중!" : `이번 기간 ${s.demerit}점 · 조심해요`;
-      $("#sDemerit").className = s.demerit===0 ? "ok" : "bad";
-      $("#sMorning").textContent = s.morning==="완료" ? "제출 완료 ✅" : "아직 안 했어요 ⏳";
-      $("#sMorning").className = s.morning==="완료" ? "ok" : "warn";
-      $("#sTodo").textContent = questsByRole[s.role] || "—";
-      $("#sRolePeriod").textContent = `2주 · 초기화 D-${state.periodDaysLeft}`;
+          <div class="panel stud-admin-panel">
+            <div class="stud-admin-meta">
+              <div class="muted small" id="studSelectedMeta">선택 0명</div>
+              <input class="input stud-search" id="studSearch" placeholder="이름 검색" />
+            </div>
+            <div class="stud-grid" id="studGrid"></div>
+            <div class="muted small" id="studEmptyMsg" style="display:none;">학생 명단이 없습니다. (메뉴 8에서 추가)</div>
+          </div>
+        </div>
+      </div>
+    </section>
 
-      // demo savings/invest
-      // (원하시면 학생별로 따로 관리하는 구조로 확장 가능)
-      $("#sSavings").textContent = "1,000";
-      $("#sInterest").textContent = "D-3";
-      $("#sInvest").textContent = "수학 도전 진행 중 · 300 루멘";
-    }
+    <!-- MODAL: STUDENT BULK CONFIRM -->
+    <div class="modal hidden" id="studBulkConfirmModal" role="dialog" aria-modal="true" aria-label="점수 지급 확인">
+      <div class="modal-card">
+        <header class="modal-top">
+          <div class="modal-title">지급 확정 하시겠습니까?</div>
+          <button class="chip" id="studBulkCancelX" type="button">닫기</button>
+        </header>
+        <div class="stud-confirm-body">
+          <div class="stud-confirm-summary" id="studConfirmSummary"></div>
+          <div class="row" style="gap:10px; justify-content:flex-end;">
+            <button class="btn soft" id="studBulkCancelBtn" type="button">취소</button>
+            <button class="btn primary" id="studBulkConfirmBtn" type="button">확정</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    function render(){
-      renderTopStats();
-      renderStudentsTable();
-      renderSelects();
-      renderRolesTable();
-      renderStore();
-      renderConstitution();
-      renderStudentHome();
+    
+    <!-- TEACHER RANGER CHECKLIST (교사 전용) -->
+    <section class="page hidden" data-page="teacher-ranger" aria-label="교실 레인저 체크리스트">
+      <div class="board-wrap">
+        <div class="board">
+          <header class="board-top">
+            <div class="board-title">교실 레인저 체크리스트</div>
+            <div class="board-actions">
+              <button class="chip" data-go="teacher-home">교사 홈</button>
+              <button class="chip" id="goPenaltyAdminBtn" type="button">벌점 관리</button>
+            </div>
+          </header>
 
-      // update view toggle chip when student changes
-      if(state.view==="student"){
-        const s = demoStudents.find(x=>x.id===state.selectedStudentId) || demoStudents[0];
-        const chip = $("#whoChip");
-        chip.innerHTML = `
-          <div class="avatar" aria-hidden="true">${s.avatar}</div>
-          <div style="display:flex;flex-direction:column;line-height:1.1">
-            <span style="font-size:12px;opacity:.9;font-weight:900">Student View</span>
-            <span style="font-size:13px">${s.name}</span>
-          </div>`;
-      }
-    }
+          <div class="ranger-grid">
+            <div class="panel ranger-panel">
+              <h3>위반 조항 선택</h3>
+              <p class="muted">헌법(메뉴1) 조항을 읽기 전용으로 불러옵니다. (중복 선택 가능)</p>
+              <div id="rangerClauseList" class="ranger-list" aria-label="위반 조항 목록"></div>
+            </div>
 
-    /***********************
-     * ACTIONS (demo)
-     ************************/
-    function adjQty(id, delta){
-      const item = store.find(x=>x.id===id);
-      if(!item) return;
-      item.qty = Math.max(0, item.qty + delta);
-      renderStore();
-    }
-    function restock(id){
-      const item = store.find(x=>x.id===id);
-      if(!item) return;
-      item.qty += 10;
-      toast("재고 +10(데모)");
-      renderStore();
-    }
+            <div class="panel ranger-panel">
+              <h3>학생 명렬표</h3>
+              <p class="muted">번호순 · 복수 선택 가능</p>
+              <div id="rangerStudentList" class="ranger-list" aria-label="학생 목록"></div>
+            </div>
+          </div>
 
-    /***********************
-     * EVENTS
-     ************************/
-    $("#btnTeacherView").addEventListener("click", ()=>setView("teacher"));
-    $("#btnStudentView").addEventListener("click", ()=>setView("student"));
+          <div class="ranger-bottom">
+            <div class="muted" id="rangerHint">00:00~17:00만 벌점 부과/취소 가능</div>
+            <button class="btn primary" id="rangerApplyBtn" type="button" disabled>벌점 부과</button>
+          </div>
 
-    $$(".navBtn", $("#teacherNav")).forEach(b=>b.addEventListener("click", ()=>go(b.dataset.page)));
-    $$(".navBtn", $("#studentNav")).forEach(b=>b.addEventListener("click", ()=>go(b.dataset.page)));
+          <div id="rangerToast" class="toast hidden" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
 
-    $("#studentSearch").addEventListener("input", renderStudentsTable);
 
-    $("#studentSelect").addEventListener("change", (e)=>{
-      state.selectedStudentId = e.target.value;
-      $("#roleStudentSelect").value = state.selectedStudentId;
-      render();
-    });
-    $("#roleStudentSelect").addEventListener("change", (e)=>{
-      state.selectedStudentId = e.target.value;
-      $("#studentSelect").value = state.selectedStudentId;
-      // update role selector to current
-      const s = demoStudents.find(x=>x.id===state.selectedStudentId) || demoStudents[0];
-      $("#roleSelect").value = s.role;
-      render();
-    });
+    <!-- STUDENT HOME (v1 frame) -->
+    <section class="page hidden" data-page="student-home" aria-label="학생 개인 관리">
+      <div class="safe-center">
+        <div class="student-v1">
+          <header class="student-v1-top">
+            <div class="student-v1-id" id="studentHomeTitle">학생 홈</div>
+            <button class="chip" id="studentLogoutBtn">나가기</button>
+          </header>
 
-    $("#btnAssignRole").addEventListener("click", ()=>{
-      const sid = $("#roleStudentSelect").value;
-      const role = $("#roleSelect").value;
-      const s = demoStudents.find(x=>x.id===sid);
-      if(!s) return;
-      s.role = role;
-      toast(`${s.name} · 직업 부여 완료`);
-      render();
-    });
+          <div class="student-v1-lock" id="studentInputWindowMsg" aria-live="polite"></div>
 
-    $("#btnClearRoles").addEventListener("click", ()=>{
-      demoStudents.forEach((s,idx)=> s.role = roles[idx % roles.length]);
-      toast("직업 전체 초기화(데모)");
-      render();
-    });
+<!-- 1단. 프로필 & 자산 -->
+<section class="student-v1-card">
 
-    $("#btnAddItem").addEventListener("click", ()=>{
-      const name = ($("#newItemName").value||"").trim();
-      const price = parseInt($("#newItemPrice").value,10);
-      const qty = parseInt($("#newItemQty").value,10);
-      if(!name){ toast("상품명을 입력해요"); return; }
-      store.push({
-        id:"I"+String(store.length+1).padStart(2,"0"),
-        name,
-        price: isFinite(price)?price:50,
-        qty: isFinite(qty)?qty:0
-      });
-      $("#newItemName").value="";
-      toast("상품 추가 완료");
-      renderStore();
-    });
+ <button class="student-v1-profile" id="studentProfileBtn" type="button" aria-label="개인 관리(캐릭터)" style="display:flex; width:100%;">
+    <div class="student-v1-avatar">
+      <img id="studentAvatarImg" src="assets/characters/CHR-1.png" alt="학생 캐릭터" />
+    </div>
 
-    $("#btnLoadTemplate").addEventListener("click", ()=>{
-      const key = $("#constitutionTemplate").value;
-      state.constitution = constitutionTemplates[key] || constitutionTemplates.default;
-      renderConstitution();
-      toast("템플릿 불러오기");
-    });
+    <div class="student-v1-profileText">
+      <div class="student-v1-name" id="studentNameLine">학생</div>
+      <div class="student-v1-sub">개인 관리로 들어가기</div>
+    </div>
 
-    $("#btnSaveConstitution").addEventListener("click", ()=>{
-      state.constitution = $("#constitutionText").value;
-      $("#sConstitutionText").value = state.constitution;
-      $("#constitutionStatus").textContent = "저장됨";
-      $("#constitutionStatus").className = "ok";
-      toast("헌법 저장 완료");
-    });
+    <div class="student-v1-assets">
+      <div class="asset"><span class="k">루멘</span><b id="studentLumenNow">0</b></div>
+      <div class="asset"><span class="k">XP</span><b id="studentXpNow">0</b></div>
+    </div>
+  </button>
 
-    $("#btnResetPeriod").addEventListener("click", ()=>{
-      state.periodDaysLeft = 10;
-      // 데모: 벌점/아침자습 리셋 예시
-      demoStudents.forEach((s,idx)=>{
-        s.demerit = 0;
-        s.morning = (idx%7===0) ? "미제출" : "완료";
-      });
-      toast("기간 초기화(데모) 완료");
-      render();
-    });
+  <div class="student-v1-xpbar">
+    <div class="student-v1-xptext" id="studentXpText">0 / 1200 XP</div>
+    <div class="bar"><div class="fill" id="studentXpBarFill"></div></div>
+    <div class="lvl" id="studentLevelNow">Lv.1</div>
+  </div>
 
-    $("#btnAward").addEventListener("click", ()=>{
-      const eligible = demoStudents.filter(s=>s.demerit===0);
-      // 데모: 모범시민상 루멘+50, XP+20
-      eligible.forEach(s=>{
-        s.lumens += 50;
-        s.xp += 20;
-        s.level = 1 + Math.floor(s.xp/100);
-      });
-      toast(`모범시민상 지급(데모): ${eligible.length}명`);
-      render();
-    });
+  <div class="modal hidden" id="studentQuickModal" aria-label="빠른 설정">
+    <div class="modal-card">
+      <div class="modal-top">
+        <div class="modal-title">빠른 설정</div>
+        <button class="chip" id="studentQuickCloseBtn" type="button">닫기</button>
+      </div>
 
-    /***********************
-     * BOOT
-     ************************/
-    (function init(){
-      // default constitution
-      $("#constitutionText").value = state.constitution;
-      $("#sConstitutionText").value = state.constitution;
+      <div class="quick3" style="margin-top:12px;">
+<button class="btn soft wide" id="studentChangeAvatarBtn" type="button">
+캐릭터 변경
+</button>
+        <button class="btn wide" id="studentChangePinBtn" type="button">PIN 재설정</button>
+        <button class="btn soft wide" data-go="student-thermometer" type="button">학급 온도계 보기</button>
+      </div>
+    </div>
+  </div>
 
-      // select default student
-      state.selectedStudentId = demoStudents[1].id;
+</section>
+          <!-- 2단. 리본 제목 -->
+          <section class="student-v1-ribbon" aria-label="제목">
+            <div class="student-v1-ribbonText" id="studentRibbonTitle">빛나는 하루</div>
+          </section>
 
-      // start teacher view
-      setView("teacher");
-      render();
-    })();
-  </script>
+          <!-- 3단. 나의 직업(조회 전용) -->
+          <section class="student-v1-card">
+            <h3>나의 직업</h3>
+            <div class="student-v1-job">
+              <div class="jobline" id="studentJobLine1"></div>
+              <div class="jobline" id="studentJobLine2"></div>
+            </div>
+          </section>
+
+          <!-- 4단. 아침자습 체크 -->
+          <section class="student-v1-card" id="studentMorningPanel">
+            <div class="student-v1-row">
+              <button class="btn primary" id="studentMorningDoneBtn">아침자습 했어요</button>
+              <button class="btn" id="studentMorningCancelBtn">취소</button>
+            </div>
+          </section>
+
+          <!-- 5단. 독서 확인 -->
+          <section class="student-v1-card collapsed" id="studentReadingPanel">
+            <div class="student-v1-readingHead">
+              <h3>독서 확인</h3>
+              <select id="studentReadingSelect" class="input" aria-label="저장된 독서 기록(오늘)">
+                <option value="">저장된 독서 기록(오늘)</option>
+              </select>
+            </div>
+            <!-- 첫 화면: 1줄 미리보기(기본 접힘) -->
+            <button class="student-v1-readingPreview" id="studentReadingPreview" type="button" aria-label="독서 기록 펼치기">
+              <span class="txt" id="studentReadingPreviewText">오늘 독서 기록 없음</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="student-v1-reading">
+              <label class="field">
+                <span>제목</span>
+                <input id="studentReadTitle" type="text" placeholder="책 제목" />
+              </label>
+              <div class="student-v1-reading2">
+                <label class="field">
+                  <span>시작 쪽</span>
+                  <input id="studentReadStart" type="number" inputmode="numeric" min="1" placeholder="예: 10"/>
+                </label>
+                <label class="field">
+                  <span>끝 쪽</span>
+                  <input id="studentReadEnd" type="number" inputmode="numeric" min="1" placeholder="예: 15"/>
+                </label>
+              </div>
+              <div class="error" id="studentActivityError" aria-live="polite"></div>
+              <div class="row" style="gap:12px; align-items:center; margin-top:12px;">
+                <button id="btnStudentReadAdd" class="btn primary">독서 기록 추가</button>
+                <div id="studentReadingCounter" class="muted small">0 / 3</div>
+                <div class="muted small" id="studentReadingSavedHint" style="margin-left:auto;">입력하면 자동 저장됩니다.</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 6단. 벌점 내역(조회 전용) -->
+          <section class="student-v1-card">
+            <div class="student-v1-penaltyHead">
+              <h3>벌점 내역</h3>
+              <div class="muted small">최신 10건</div>
+            </div>
+            <div class="student-v1-penaltyEmpty muted" id="studentPenaltyEmpty">모범 시민 진행 중</div>
+            <ul class="student-v1-penalty" id="studentPenaltyList"></ul>
+            <div class="muted small">(학생은 수정/삭제 불가)</div>
+          </section>
+
+          <!-- 7단. 세빛 은행 -->
+          <section class="student-v1-card">
+            <div class="student-v1-bankHead">
+              <h3>세빛 은행</h3>
+              <button class="btn soft" id="studentGoBankBtn">저금하러 가기</button>
+            </div>
+            <div class="student-v1-bankBody">
+              <div class="bankline"><span>저금 중</span><b id="studentBankBalance">0</b></div>
+              <div class="bankline"><span>이자까지</span><b id="studentBankDday">D-</b></div>
+              <div class="muted small">100루멘 단위 · 10일 만기 · 만기 시 3% 이자 자동 지급</div>
+            </div>
+            <div class="student-v1-row">
+              <button class="btn" id="studentBankCancelBtn">해지하기</button>
+            </div>
+          </section>
+
+
+<!-- 7-1단. 학급 기부하기 -->
+<section class="student-v1-card student-v1-donation">
+  <div class="student-v1-bankHead">
+    <h3>학급 기부하기</h3>
+    <div class="muted small" id="studentDonateHint">하루 100루멘까지 · 기부는 되돌릴 수 없습니다.</div>
+  </div>
+  <div class="student-v1-donationBody">
+    <div class="donateRow">
+      <input class="input" id="studentDonateAmount" inputmode="numeric" placeholder="금액(1~100)" />
+      <button class="btn accent" id="studentDonateBtn">기부하기</button>
+    </div>
+    <div class="muted small" id="studentDonateRemain"></div>
+  </div>
+</section>
+
+          <!-- 7-2단. 퀘스트 보러가기 -->
+          <section class="student-v1-card student-v1-questcta">
+            <button class="btn accent wide" id="studentQuestViewBtn" type="button">퀘스트 보러가기</button>
+          </section>
+
+          <!-- 8단. 기능 메뉴 -->
+          <section class="student-v1-menu">
+            <button class="menuBtn" data-go="student-constitution">세빛 헌법</button>
+            <button class="menuBtn" data-go="student-jobstatus">직업 현황</button>
+            <button class="menuBtn" data-go="student-shop">빛의 상점</button>
+            <button class="menuBtn" data-go="student-pocket">나의 라이트 포켓</button>
+</section>
+
+          <!-- 9단. 닫기 -->
+          <button class="student-v1-close" id="studentCloseBtn">닫기</button>
+          <p class="hint">활동 기록은 오늘만 입력/취소 가능합니다. (0시 초기화)
+            <span class="muted">· 17:00 이후 입력 잠금</span></p>
+        </div>
+      </div>
+    </section>
+
+<!-- STUDENT THERMOMETER VIEW -->
+    <section class="page hidden" data-page="student-thermometer" aria-label="학급 온도계(학생)">
+      <div class="safe-center">
+        <div class="student-card">
+          <header class="student-top">
+            <div class="student-title">학급 온도계</div>
+            <button class="chip" data-go="student-home">뒤로</button>
+          </header>
+
+          <div class="thermo">
+            <div class="thermo-bar"><div class="thermo-fill" id="sThermoFill"></div></div>
+            <div class="thermo-meta">
+              <div><b id="sThermoNow">0</b> / <span id="sThermoGoal">0</span></div>
+              <div class="muted small">진행 상황만 열람</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    
+        <!-- STUDENT: CONSTITUTION (읽기 전용) -->
+    <section class="page hidden" data-page="student-constitution" aria-label="세빛 헌법(학생)">
+      <div class="safe-center">
+        <div class="student-card">
+          <header class="student-top">
+            <div class="student-title">세빛 헌법</div>
+            <button class="chip" data-go="student-home">뒤로</button>
+          </header>
+          <div class="panel">
+            <p class="muted">읽기 전용 문서 화면 (교사 관리에서 설정된 내용 표시)</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page hidden" data-page="student-jobstatus" aria-label="직업 현황(학생)">
+      <div class="safe-center">
+        <div class="student-card">
+          <header class="student-top">
+            <div class="student-title">직업 현황</div>
+            <button class="chip" data-go="student-home">뒤로</button>
+          </header>
+          <div class="panel">
+            <p class="muted">본인 직업 0~2개 조회 전용</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page hidden" data-page="student-shop" aria-label="빛의 상점(학생)">
+  <div class="safe-center">
+    <div class="student-card">
+      <header class="student-top">
+        <div class="student-title">빛의 상점</div>
+        <button class="chip" data-go="student-home">뒤로</button>
+      </header>
+
+      <div class="lightshop-shell">
+        <div class="lightshop-title">빛의 상점</div>
+        <div class="lightshop-tabs" role="tablist" aria-label="카테고리">
+          <button class="lightshop-tab is-active" data-cat="all" type="button">전체</button>
+          <button class="lightshop-tab" data-cat="coupon" type="button" disabled>쿠폰</button>
+          <button class="lightshop-tab" data-cat="snack" type="button" disabled>간식</button>
+          <button class="lightshop-tab" data-cat="school" type="button" disabled>학용품</button>
+        </div>
+
+        <div class="lightshop-grid" id="studentShopGrid"></div>
+        <div class="lightshop-empty muted" id="studentShopEmpty" aria-live="polite"></div>
+
+        <div class="lightshop-bottom">
+          <div class="lightshop-bottom-row">
+            <span class="label">현재 보유 루멘</span>
+            <span class="value mono" id="studentShopLumen">0</span>
+          </div>
+
+          <div class="lightshop-bottom-row">
+            <span class="label">오늘 신청</span>
+            <span class="value mono" id="studentShopDailyCount">0/30</span>
+          </div>
+          <div class="lightshop-bottom-row">
+            <span class="label">포켓 사용 칸</span>
+            <span class="value mono" id="studentShopPocketRemain">10/10</span>
+          </div>
+        </div>
+
+        <button class="btn wide lightshop-close" type="button" data-go="student-home">닫기</button>
+        <div class="lightshop-note muted small">구매 즉시 확정 · 환불/되돌리기 없음</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+    
+    <section class="page hidden" data-page="student-pocket" aria-label="나의 라이트 포켓(학생)">
+      <div class="safe-center">
+        <div class="student-card pocket-card">
+          <header class="student-top">
+            <div class="student-title">나의 라이트 포켓</div>
+            <button class="chip" data-go="student-home">뒤로</button>
+          </header>
+
+          <div class="pocket-wrap">
+            <div class="pocket-grid" id="pocketGrid"></div>
+
+            <div class="pocket-bottom">
+              <div class="pocket-bottom-row">
+                <span class="label">현재 보유 루멘</span>
+                <span class="value mono" id="pocketLumen">0</span>
+              </div>
+              <div class="pocket-bottom-row">
+                <span class="label">포켓 사용 칸</span>
+                <span class="value mono" id="pocketRemain">10/10</span>
+              </div>
+            </div>
+
+            <div class="muted small pocket-note">
+              ※ (신청중)은 0시에 해제되며, 상품은 포켓에 남아 있습니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <section class="page hidden" data-page="student-lightmerchant" aria-label="빛의 상인 체크리스트(학생)">
+      <div class="safe-center">
+        <div class="student-card">
+          <header class="student-top">
+            <div class="student-title">
+              <div class="student-title-main">빛의 상인 · 지급 요청</div>
+              <div class="student-title-sub">※ 오늘 요청만 처리 가능</div>
+            </div>
+            <div class="student-actions">
+              <button class="chip" id="lmHistoryBtn">누가기록</button>
+              <button class="chip" data-go="student-home">뒤로</button>
+            </div>
+          </header>
+
+          <div class="panel">
+            <div class="weather-card">
+              <div class="weather-top">
+                <div class="weather-brand">SEBIT Light World</div>
+                <div class="weather-title">빛의 상인</div>
+                <div class="weather-date" id="lmDateLabel">YYYY-MM-DD</div>
+              </div>
+
+              <div class="weather-panel">
+                <div class="weather-sec-h">지급 요청 목록</div>
+
+                <div class="lm-tableWrap">
+                  <table class="lm-table" aria-label="지급 요청 목록">
+                    <thead>
+                      <tr>
+                        <th class="col-no">번호</th>
+                        <th class="col-student">학생</th>
+                        <th class="col-item">상품</th>
+                        <th class="col-memo">전달 메모</th>
+                        <th class="col-action">처리</th>
+                      </tr>
+                    </thead>
+                    <tbody id="lmRequestTbody">
+                      <!-- rows -->
+                    </tbody>
+                  </table>
+                </div>
+
+                <p class="hint" id="lmHint">오늘은 최대 30건까지 표시돼요.</p>
+
+                <div class="weather-btnrow">
+                  <button class="btn primary" id="lmCloseBtn">기록 마감</button>
+                  <button class="btn" id="lmOpenBtn">마감 해제</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+<section class="page hidden" data-page="student-lightmerchant-history" aria-label="빛의 상인 누가기록(학생)">
+      <div class="safe-center">
+        <div class="student-card lm-card">
+          <header class="student-top lm-top">
+            <div class="student-title">
+              <div class="lm-brand">SEBIT Light World</div>
+              <div class="lm-title">누가기록</div>
+              <div class="lm-date" id="lmHistoryDateLabel">최근 50개</div>
+            </div>
+            <div class="lm-topActions">
+              <button class="chip" data-go="student-lightmerchant">뒤로</button>
+            </div>
+          </header>
+
+          <div class="panel lm-panel">
+            <div class="lm-tableWrap">
+              <table class="lm-table" aria-label="지급 완료 누가기록">
+                <thead>
+                  <tr>
+                    <th class="col-no">번호</th>
+                    <th class="col-student">학생</th>
+                    <th class="col-item">상품</th>
+                    <th class="col-memo">전달 메모</th>
+                    <th class="col-action">완료시각</th>
+                  </tr>
+                </thead>
+                <tbody id="lmHistoryTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+<!-- MODAL: CHARACTER PICKER -->
+    <div class="modal hidden" id="charModal" role="dialog" aria-modal="true" aria-label="캐릭터 선택">
+      <div class="modal-card wide">
+        <header class="modal-top">
+          <div class="modal-title">캐릭터 선택</div>
+          <button class="chip" id="closeCharModalBtn" type="button">닫기</button>
+        </header>
+        <div class="char-grid" id="charGrid"></div>
+      </div>
+    </div>
+
+    <!-- MODAL: PIN RESET -->
+    <div class="modal hidden" id="pinResetModal" role="dialog" aria-modal="true" aria-label="비밀번호 재설정">
+      <div class="modal-card">
+        <header class="modal-top">
+          <div class="modal-title">비밀번호 재설정</div>
+          <button class="chip" id="closePinResetModalBtn" type="button">닫기</button>
+        </header>
+        <label class="field">
+          <span>새 PIN</span>
+          <input id="pinResetInput" type="password" inputmode="numeric" maxlength="6" placeholder="숫자 4~6자리"/>
+        </label>
+        <button class="btn primary wide" id="savePinResetBtn" type="button">저장</button>
+        <div class="error" id="pinResetError" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <!-- TOAST -->
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+
+    <!-- MODAL: ADMIN (공통 관리 팝업) -->
+    <div class="modal admin-modal hidden" id="adminModal" role="dialog" aria-modal="true" aria-label="관리 팝업">
+      <div class="modal-card admin-card">
+        <header class="admin-top">
+          <div class="admin-title" id="adminModalTitle">관리</div>
+          <div class="admin-actions"><button class="chip hidden" id="adminSecondaryBtn" type="button">퀘스트 보기</button><button class="chip" id="closeAdminModalBtn" type="button">되돌아오기</button></div>
+        </header>
+        <div class="admin-body">
+          <div class="admin-placeholder" id="adminModalBody">
+            준비 중입니다.
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- MODAL: PIN CHANGE -->
+    <div class="modal hidden" id="pinModal" role="dialog" aria-modal="true" aria-label="PIN 변경">
+      <div class="modal-card">
+        <header class="modal-top">
+          <div class="modal-title">PIN 변경</div>
+          <button class="chip" id="closePinModalBtn">닫기</button>
+        </header>
+        <label class="field">
+          <span>새 PIN</span>
+          <input id="newPinInput" type="password" inputmode="numeric" maxlength="6" placeholder="숫자 4~6자리"/>
+        </label>
+        <button class="btn primary wide" id="saveNewPinBtn">저장</button>
+        <div class="error" id="pinModalError" aria-live="polite"></div>
+      </div>
+    </div>
+
+<!-- STUDENT DASHBOARD (학생홈 메인) -->
+    <section class="page hidden" data-page="student-dashboard" aria-label="학생홈(메인)">
+      <div class="safe-center">
+        <div class="student-card student-dashboard">
+          <header class="student-top">
+            <div class="student-title" id="studentDashTitle">학생홈</div>
+            <button class="chip" id="studentDashLogoutBtn">나가기</button>
+          </header>
+
+          <div class="dash-profile" id="dashProfileBtn" role="button" tabindex="0" aria-label="개인관리로 이동">
+            <div class="avatar-ring">
+              <img id="dashAvatarImg" alt="학생 캐릭터"/>
+            </div>
+            <div class="dash-meta">
+              <div class="dash-name" id="dashName">이름</div>
+              <div class="dash-sub muted">개인 관리로 들어가기</div>
+            </div>
+            <div class="dash-assets">
+              <div class="asset"><span class="muted">루멘</span><b id="dashLumen">0</b></div>
+              <div class="asset"><span class="muted">XP</span><b id="dashXp">0</b></div>
+            </div>
+          </div>
+
+          <div class="dash-actions">
+            <button class="btn soft wide" data-go="student-thermometer">학급 온도계 보기</button>
+          </div>
+
+          <p class="hint">캐릭터를 누르면 개인 관리로 들어갑니다.</p>
+        </div>
+      </div>
+    </section>
+
+
+  </div>
+
+  
+
+<script src="inject_activity_dummy.js"></script>
+
+    <!-- MODAL: QUEST VIEW (학생/교사 공용 보기) -->
+    <div class="modal quest-modal hidden" id="questViewModal" role="dialog" aria-modal="true" aria-label="퀘스트 보기">
+      <div class="modal-card quest-card">
+        <header class="quest-top">
+          <div class="quest-title">퀘스트 보기</div>
+          <button class="chip" id="closeQuestViewBtn" type="button">되돌아가기</button>
+        </header>
+        <div class="quest-body" id="questViewBody"></div>
+      </div>
+    </div>
+
+    <!-- MODAL: QUEST DETAIL (퀘스트 현황) -->
+    <div class="modal quest-modal hidden" id="questDetailModal" role="dialog" aria-modal="true" aria-label="퀘스트 현황">
+      <div class="modal-card quest-card">
+        <header class="quest-top">
+          <div class="quest-title" id="questDetailTitle">퀘스트 현황</div>
+          <button class="chip" id="closeQuestDetailBtn" type="button">되돌아가기</button>
+        </header>
+        <div class="quest-body" id="questDetailBody"></div>
+      </div>
+    </div>
+
+
+<!-- SEBIT Safety: localStorage backup tool -->
+<a href="backup_tool.html" style="position:fixed; right:14px; bottom:14px; z-index:9999; text-decoration:none;" class="btn small">백업</a>
+
 </body>
 </html>
+    
+
