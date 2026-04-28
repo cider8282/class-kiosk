@@ -1,3 +1,21 @@
+// Firebase 연결
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+// Firebase 설정
+const firebaseConfig = {
+  apiKey: "AIzaSyCKcYXyywiJuThbboYZDtHSbmhwGyj5Vpo",
+  authDomain: "sebit-class-2026.firebaseapp.com",
+  projectId: "sebit-class-2026",
+  storageBucket: "sebit-class-2026.firebasestorage.app",
+  messagingSenderId: "255915011407",
+  appId: "1:255915011407:web:e38e2dccc175226a9da93a"
+};
+
+// 초기화
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 ;
 
 
