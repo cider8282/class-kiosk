@@ -21,7 +21,7 @@ const db = getFirestore(app);
    - 학생명단/루멘/XP가 바뀌면 Firestore students 컬렉션에 자동 저장
    - 접속 시 Firestore students를 먼저 불러와 localStorage 캐시를 갱신
 */
-const FS_COLLECTIONS = { students: "students" };
+const FS_COLLECTIONS = { students: "students", penaltyLogs: "penaltyLogs" };
 let __sebitStudentsLoadingFromFirestore = false;
 let __sebitStudentsSyncTimer = null;
 
@@ -99,6 +99,81 @@ async function loadStudentsFromFirestore(){
 
 
 
+
+/* === Firestore sync: penalty logs (2단계: 벌점 기록) ===
+   - 벌점 기록은 penaltyLogs 컬렉션에 저장
+   - 학생 루멘/XP 변경은 1단계 students 동기화가 함께 처리
+*/
+let __sebitPenaltyLoadingFromFirestore = false;
+let __sebitPenaltySyncTimer = null;
+
+function fsPenaltyDocId(logId){
+  const raw = String(logId || "").trim() || ("penalty_" + Date.now());
+  return encodeURIComponent(raw).replace(/\./g, "%2E");
+}
+function normalizePenaltyForFirestore(log){
+  const n = normalizePenaltyLog(log);
+  if(!n) return null;
+  n.lumen = Math.abs(Number(n.lumen || 0));
+  n.xp = Math.abs(Number(n.xp || 0));
+  n.ts = Number(n.ts || Date.now());
+  n.updatedAt = Date.now();
+  return n;
+}
+async function syncPenaltyLogsToFirestoreNow(){
+  if(__sebitPenaltyLoadingFromFirestore) return;
+  try{
+    const store = readPenaltyStoreRaw() || { version:2, logs:[] };
+    const logs = Array.isArray(store.logs) ? store.logs.map(normalizePenaltyForFirestore).filter(Boolean) : [];
+    const existingSnap = await getDocs(collection(db, FS_COLLECTIONS.penaltyLogs));
+    const existingIds = new Set(existingSnap.docs.map(d=>d.id));
+    const nextIds = new Set(logs.map(l=>fsPenaltyDocId(l.id)));
+    const batch = writeBatch(db);
+    logs.forEach(l=>{
+      batch.set(doc(db, FS_COLLECTIONS.penaltyLogs, fsPenaltyDocId(l.id)), l, { merge:false });
+    });
+    existingIds.forEach(id=>{
+      if(!nextIds.has(id)) batch.delete(doc(db, FS_COLLECTIONS.penaltyLogs, id));
+    });
+    await batch.commit();
+    console.log("[SEBIT] penalty logs synced to Firestore", logs.length);
+  }catch(err){
+    console.error("[SEBIT] penalty logs Firestore sync failed", err);
+  }
+}
+function schedulePenaltyLogsFirestoreSync(){
+  if(__sebitPenaltyLoadingFromFirestore) return;
+  clearTimeout(__sebitPenaltySyncTimer);
+  __sebitPenaltySyncTimer = setTimeout(syncPenaltyLogsToFirestoreNow, 500);
+}
+async function loadPenaltyLogsFromFirestore(){
+  try{
+    __sebitPenaltyLoadingFromFirestore = true;
+    const snap = await getDocs(collection(db, FS_COLLECTIONS.penaltyLogs));
+    const fromCloud = [];
+    snap.forEach(d=>{
+      const data = d.data() || {};
+      const n = normalizePenaltyForFirestore({ ...data, id: data.id || decodeURIComponent(d.id) });
+      if(n) fromCloud.push(n);
+    });
+    fromCloud.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0));
+    if(fromCloud.length > 0){
+      localStorage.setItem(LS_KEYS.penaltyStore, JSON.stringify({ version:2, logs:fromCloud }));
+      console.log("[SEBIT] penalty logs loaded from Firestore", fromCloud.length);
+    }else{
+      const local = readPenaltyStoreRaw();
+      if(local && Array.isArray(local.logs) && local.logs.length > 0){
+        __sebitPenaltyLoadingFromFirestore = false;
+        await syncPenaltyLogsToFirestoreNow();
+        __sebitPenaltyLoadingFromFirestore = true;
+      }
+    }
+  }catch(err){
+    console.error("[SEBIT] penalty logs Firestore load failed", err);
+  }finally{
+    __sebitPenaltyLoadingFromFirestore = false;
+  }
+}
 // --- utils: safe text ---
 function escapeHTML(str) {
   if (str === undefined || str === null) return '';
@@ -165,6 +240,7 @@ function readPenaltyStoreRaw(){
 function savePenaltyStore(store){
   const logs = Array.isArray(store?.logs) ? store.logs.map(x=>normalizePenaltyLog(x)).filter(Boolean) : [];
   localStorage.setItem(LS_KEYS.penaltyStore, JSON.stringify({ version:2, logs }));
+  try { schedulePenaltyLogsFirestoreSync(); } catch(_) {}
 }
 function getPenaltyStore(){
   const existing = readPenaltyStoreRaw();
@@ -9278,8 +9354,8 @@ function clearMeal(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  loadStudentsFromFirestore().then(() => {
-    // Firestore에서 학생명단/루멘/XP를 가져온 뒤 현재 화면이 학생 관련 화면이면 다시 그림
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점 기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       const page = String(document.body.getAttribute("data-page") || "");
       if (page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
