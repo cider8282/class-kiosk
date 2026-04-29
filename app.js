@@ -9898,6 +9898,124 @@ function clearMeal(){
 
 
 
+
+/* === SEBIT cost guard: realtime connection protection ===
+   - 기능을 막지 않고, 화면이 꺼지거나 앱이 뒤로 가거나 10분간 조작이 없으면 onSnapshot 실시간 연결만 끊음
+   - 다시 화면으로 돌아오거나 터치/클릭하면 서버에서 최신 데이터를 1회 읽고 실시간 연결을 재개함
+   - 저장(write) 기능은 그대로 동작함
+*/
+const SEBIT_REALTIME_IDLE_MS = 10 * 60 * 1000;
+let __sebitRealtimeIdleTimer = null;
+let __sebitRealtimeResuming = false;
+window.__sebitRealtimePaused = false;
+
+function sebitSafeUnsub(fn, label){
+  try{ if(typeof fn === "function") fn(); }
+  catch(err){ console.warn("[SEBIT GUARD] unsubscribe skipped", label, err); }
+}
+
+function sebitStopRealtimeListeners(reason="idle"){
+  window.__sebitRealtimePaused = true;
+
+  sebitSafeUnsub(__sebitUnsubStudents, "students");
+  sebitSafeUnsub(__sebitUnsubPenaltyLogs, "penaltyLogs");
+  sebitSafeUnsub(__sebitUnsubConstitution, "constitution");
+  sebitSafeUnsub(__sebitUnsubJobState, "jobState");
+  sebitSafeUnsub(__sebitUnsubShopState, "shopState");
+  try{ (Array.isArray(__sebitUnsubShopDocs) ? __sebitUnsubShopDocs : []).forEach((fn, i)=>sebitSafeUnsub(fn, "shopDoc"+i)); }catch(_){ }
+  try{ sebitSafeUnsub(window.__sebitEmergencyShopDirectUnsub, "directShop"); }catch(_){ }
+
+  __sebitUnsubStudents = null;
+  __sebitUnsubPenaltyLogs = null;
+  __sebitUnsubConstitution = null;
+  __sebitUnsubJobState = null;
+  __sebitUnsubShopState = null;
+  __sebitUnsubShopDocs = [];
+  window.__sebitEmergencyShopDirectUnsub = null;
+  window.__sebitEmergencyShopDirectListener = false;
+
+  __sebitRealtimeStarted = false;
+  __sebitConstitutionRealtimeStarted = false;
+  __sebitShopRealtimeStarted = false;
+  __sebitJobRealtimeStarted = false;
+
+  console.log("[SEBIT GUARD] realtime stopped:", reason);
+}
+
+function sebitStartRealtimeListeners(){
+  if(document.hidden) return;
+  window.__sebitRealtimePaused = false;
+  try{ startFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] student/penalty realtime start skipped", err); }
+  try{ startShopFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] shop realtime start skipped", err); }
+  try{ startJobFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] job realtime start skipped", err); }
+  try{ startConstitutionFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] constitution realtime start skipped", err); }
+  try{ if(typeof installDirectShopListener === "function") installDirectShopListener(); }catch(_){ }
+  console.log("[SEBIT GUARD] realtime started");
+}
+
+function sebitRefreshVisiblePageAfterResume(){
+  try{ refreshCurrentSebitPageFromRealtime(); }catch(_){ }
+  try{ refreshShopPagesFromRealtime(); }catch(_){ }
+  try{ refreshJobPagesFromRealtime(); }catch(_){ }
+  try{ refreshConstitutionViewsFromRealtime(); }catch(_){ }
+}
+
+async function sebitResumeRealtimeListeners(reason="activity"){
+  if(document.hidden || __sebitRealtimeResuming) return;
+  __sebitRealtimeResuming = true;
+  try{
+    window.__sebitRealtimePaused = false;
+    // 꺼져 있던 동안 바뀐 내용을 1회만 읽어와서 화면을 최신화한 뒤 실시간 감시 재개
+    await Promise.all([
+      loadStudentsFromFirestore(),
+      loadPenaltyLogsFromFirestore(),
+      loadShopStateFromFirestore(),
+      loadJobStateFromFirestore(),
+      loadConstitutionFromFirestore()
+    ]);
+    sebitRefreshVisiblePageAfterResume();
+    sebitStartRealtimeListeners();
+    console.log("[SEBIT GUARD] realtime resumed:", reason);
+  }catch(err){
+    console.error("[SEBIT GUARD] realtime resume failed", err);
+  }finally{
+    __sebitRealtimeResuming = false;
+    sebitResetIdleTimer();
+  }
+}
+
+function sebitResetIdleTimer(){
+  clearTimeout(__sebitRealtimeIdleTimer);
+  if(document.hidden) return;
+  __sebitRealtimeIdleTimer = setTimeout(()=>{
+    sebitStopRealtimeListeners("10분 미사용");
+  }, SEBIT_REALTIME_IDLE_MS);
+}
+
+function sebitMarkUserActivity(){
+  sebitResetIdleTimer();
+  if(window.__sebitRealtimePaused && !document.hidden){
+    sebitResumeRealtimeListeners("사용자 조작");
+  }
+}
+
+function installSebitRealtimeCostGuard(){
+  ["click", "touchstart", "keydown", "pointerdown"].forEach(evt=>{
+    window.addEventListener(evt, sebitMarkUserActivity, { passive:true });
+  });
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.hidden){
+      sebitStopRealtimeListeners("화면 숨김/꺼짐");
+      clearTimeout(__sebitRealtimeIdleTimer);
+    }else{
+      sebitResumeRealtimeListeners("화면 복귀");
+    }
+  });
+  window.addEventListener("pagehide", ()=>sebitStopRealtimeListeners("페이지 종료"));
+  window.addEventListener("beforeunload", ()=>sebitStopRealtimeListeners("페이지 종료"));
+  sebitResetIdleTimer();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
   Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore()]).then(() => {
@@ -9907,10 +10025,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const page = String(document.body.getAttribute("data-page") || "");
       if (page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
       if (page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
-      startFirestoreRealtimeSync();
-      startShopFirestoreRealtimeSync();
-      startJobFirestoreRealtimeSync();
-      startConstitutionFirestoreRealtimeSync();
+      sebitStartRealtimeListeners();
+      installSebitRealtimeCostGuard();
     } catch (_) {}
   });
   runMidnightResetIfNeeded();
@@ -11469,8 +11585,9 @@ function closeStudentShopPreviewModal(){
   function installDirectShopListener(){
     try{
       if(!window.firebase || !firebase.firestore || window.__sebitEmergencyShopDirectListener) return;
+      if(window.__sebitRealtimePaused || document.hidden) return;
       window.__sebitEmergencyShopDirectListener = true;
-      firebase.firestore().collection("sharedState").doc("shopProducts").onSnapshot(function(snap){
+      window.__sebitEmergencyShopDirectUnsub = firebase.firestore().collection("sharedState").doc("shopProducts").onSnapshot(function(snap){
         if(!snap.exists) return;
         const data = snap.data() || {};
         const value = Array.isArray(data.value) ? data.value : [];
