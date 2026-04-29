@@ -278,6 +278,7 @@ let __sebitShopLoadingFromFirestore = false;
 let __sebitShopSyncTimer = null;
 let __sebitShopRealtimeStarted = false;
 let __sebitUnsubShopState = null;
+let __sebitUnsubShopDocs = [];
 
 function fsSharedStateDocId(name){ return String(name || "").trim(); }
 function fsShopKeyNameFromLSKey(key){
@@ -380,26 +381,30 @@ function refreshShopPagesFromRealtime(){
 function startShopFirestoreRealtimeSync(){
   if(__sebitShopRealtimeStarted) return;
   __sebitShopRealtimeStarted = true;
+
+  // 중요: sharedState는 "컬렉션 전체"보다 각 문서(shopProducts 등)를 직접 감시하는 방식이 iPad에서 더 안정적임.
   try{
-    __sebitUnsubShopState = onSnapshot(collection(db, FS_SHARED_STATE_COLLECTION), (snap)=>{
-      __sebitShopLoadingFromFirestore = true;
-      let changed = false;
-      snap.forEach(d=>{
-        const id = String(d.id || "");
-        if(!FS_SHOP_KEYS.includes(id)) return;
-        const data = d.data() || {};
-        const key = fsShopLocalStorageKeyFromName(id);
-        if(!key) return;
-        localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForShopKey(id)));
-        changed = true;
-      });
-      __sebitShopLoadingFromFirestore = false;
-      if(changed){
-        console.log("[SEBIT] shop/pocket realtime updated");
-        refreshShopPagesFromRealtime();
-      }
-    }, (err)=>{ console.error("[SEBIT] shop/pocket realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] shop/pocket realtime listener failed", err); }
+    __sebitUnsubShopDocs = FS_SHOP_KEYS.map(name => {
+      return onSnapshot(doc(db, FS_SHARED_STATE_COLLECTION, fsSharedStateDocId(name)), (docSnap)=>{
+        try{
+          // compat DocumentSnapshot: exists는 함수
+          const exists = (typeof docSnap.exists === "function") ? docSnap.exists() : !!docSnap.exists;
+          if(!exists) return;
+          const data = docSnap.data() || {};
+          const key = fsShopLocalStorageKeyFromName(name);
+          if(!key) return;
+          __sebitShopLoadingFromFirestore = true;
+          localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForShopKey(name)));
+          __sebitShopLoadingFromFirestore = false;
+          console.log("[SEBIT] shop doc realtime updated", name);
+          refreshShopPagesFromRealtime();
+        }catch(err){
+          __sebitShopLoadingFromFirestore = false;
+          console.error("[SEBIT] shop doc realtime apply failed", name, err);
+        }
+      }, (err)=>{ console.error("[SEBIT] shop doc realtime sync failed", name, err); });
+    });
+  }catch(err){ console.error("[SEBIT] shop doc realtime listener failed", err); }
 }
 
 
@@ -11160,10 +11165,26 @@ function closeStudentShopPreviewModal(){
     }catch(err){ console.warn("[SEBIT FINAL] derive jobs -> students skipped", err); return false; }
   };
 
+
+
+  window.sebitFinalLoadShopProductsDocNow = async function(){
+    try{
+      const snap = await doc(db, FS_SHARED_STATE_COLLECTION, "shopProducts").get();
+      const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
+      if(!exists) return false;
+      const data = snap.data() || {};
+      localStorage.setItem(LS.shopProducts, JSON.stringify(data.value !== undefined ? data.value : []));
+      return true;
+    }catch(err){ console.warn("[SEBIT FINAL] load shopProducts doc skipped", err); return false; }
+  };
+
   window.sebitFinalRefreshShopScreens = function(){
     try{
       const page = String(document.body.getAttribute("data-page") || "");
-      if(page === "student-shop" && typeof renderStudentShop === "function") renderStudentShop();
+      if(page === "student-shop" && typeof renderStudentShop === "function") {
+        try{ window.sebitFinalLoadShopProductsDocNow && window.sebitFinalLoadShopProductsDocNow().then(function(){ renderStudentShop(); }); }catch(_){ renderStudentShop(); }
+        renderStudentShop();
+      }
       if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
       if(typeof renderTeacherHome === "function" && page === "teacher-home") renderTeacherHome();
       if(typeof renderStudentShell === "function" && page.startsWith("student-")) renderStudentShell();
@@ -11243,7 +11264,7 @@ function closeStudentShopPreviewModal(){
 
   window.addEventListener("load", function(){
     setTimeout(function(){
-      try{ if(typeof syncShopStateToFirestoreNow === "function") syncShopStateToFirestoreNow(); }catch(_){ }
+      try{ if(typeof loadShopStateFromFirestore === "function") loadShopStateFromFirestore().then(function(){ try{ window.sebitFinalRefreshShopScreens(); }catch(_){} }); }catch(_){ }
       try{ if(typeof syncAllLocalJobStateToFirestoreNow === "function") syncAllLocalJobStateToFirestoreNow(); }catch(_){ }
       try{ window.sebitFinalDeriveStudentJobsFromAssign(); }catch(_){ }
       try{ window.sebitFinalRefreshShopScreens(); }catch(_){ }
