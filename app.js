@@ -1,6 +1,6 @@
 // Firebase 연결
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 // Firebase 설정
 const firebaseConfig = {
@@ -16,7 +16,86 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-;
+/* === Firestore sync: students + lumen/xp (1단계) ===
+   - 화면은 기존 localStorage를 그대로 읽음
+   - 학생명단/루멘/XP가 바뀌면 Firestore students 컬렉션에 자동 저장
+   - 접속 시 Firestore students를 먼저 불러와 localStorage 캐시를 갱신
+*/
+const FS_COLLECTIONS = { students: "students" };
+let __sebitStudentsLoadingFromFirestore = false;
+let __sebitStudentsSyncTimer = null;
+
+function fsStudentDocId(studentId){
+  const raw = String(studentId || "").trim() || ("student_" + Date.now());
+  return encodeURIComponent(raw).replace(/\./g, "%2E");
+}
+function normalizeStudentForFirestore(s){
+  const out = { ...(s || {}) };
+  out.id = String(out.id || "").trim();
+  out.name = String(out.name || "").trim();
+  out.no = Number.isFinite(Number(out.no)) ? Number(out.no) : 0;
+  out.lumen = Number.isFinite(Number(out.lumen)) ? Number(out.lumen) : 0;
+  out.xp = Number.isFinite(Number(out.xp)) ? Number(out.xp) : 0;
+  out.active = out.active === false ? false : true;
+  out.updatedAt = Date.now();
+  return out;
+}
+async function syncStudentsToFirestoreNow(){
+  if(__sebitStudentsLoadingFromFirestore) return;
+  try{
+    const arr = readJSON(LS.students, []);
+    const students = Array.isArray(arr) ? arr.map(normalizeStudentForFirestore).filter(s=>s.id) : [];
+    const existingSnap = await getDocs(collection(db, FS_COLLECTIONS.students));
+    const existingIds = new Set(existingSnap.docs.map(d=>d.id));
+    const nextIds = new Set(students.map(s=>fsStudentDocId(s.id)));
+    const batch = writeBatch(db);
+    students.forEach(s=>{
+      batch.set(doc(db, FS_COLLECTIONS.students, fsStudentDocId(s.id)), s, { merge:false });
+    });
+    existingIds.forEach(id=>{
+      if(!nextIds.has(id)) batch.delete(doc(db, FS_COLLECTIONS.students, id));
+    });
+    await batch.commit();
+    console.log("[SEBIT] students synced to Firestore", students.length);
+  }catch(err){
+    console.error("[SEBIT] students Firestore sync failed", err);
+  }
+}
+function scheduleStudentsFirestoreSync(){
+  if(__sebitStudentsLoadingFromFirestore) return;
+  clearTimeout(__sebitStudentsSyncTimer);
+  __sebitStudentsSyncTimer = setTimeout(syncStudentsToFirestoreNow, 500);
+}
+async function loadStudentsFromFirestore(){
+  try{
+    __sebitStudentsLoadingFromFirestore = true;
+    const snap = await getDocs(collection(db, FS_COLLECTIONS.students));
+    const fromCloud = [];
+    snap.forEach(d=>{
+      const data = d.data() || {};
+      fromCloud.push(normalizeStudentForFirestore({ ...data, id: data.id || decodeURIComponent(d.id) }));
+    });
+    fromCloud.sort((a,b)=>(Number(a.no)||0)-(Number(b.no)||0) || String(a.name).localeCompare(String(b.name), "ko"));
+
+    if(fromCloud.length > 0){
+      localStorage.setItem(LS.students, JSON.stringify(fromCloud));
+      console.log("[SEBIT] students loaded from Firestore", fromCloud.length);
+    }else{
+      // 처음 연결한 날: 기존 localStorage 학생명단이 있으면 서버에 1회 업로드
+      const local = readJSON(LS.students, []);
+      if(Array.isArray(local) && local.length > 0){
+        __sebitStudentsLoadingFromFirestore = false;
+        await syncStudentsToFirestoreNow();
+        __sebitStudentsLoadingFromFirestore = true;
+      }
+    }
+  }catch(err){
+    console.error("[SEBIT] students Firestore load failed", err);
+  }finally{
+    __sebitStudentsLoadingFromFirestore = false;
+  }
+}
+
 
 
 
@@ -491,6 +570,11 @@ function readJSON(key, fallback) {
 }
 function writeJSON(key, val) {
   localStorage.setItem(key, JSON.stringify(val));
+  try {
+    if (typeof LS !== "undefined" && key === LS.students) {
+      scheduleStudentsFirestoreSync();
+    }
+  } catch (_) {}
 }
 
 
@@ -9194,6 +9278,14 @@ function clearMeal(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
+  loadStudentsFromFirestore().then(() => {
+    // Firestore에서 학생명단/루멘/XP를 가져온 뒤 현재 화면이 학생 관련 화면이면 다시 그림
+    try {
+      const page = String(document.body.getAttribute("data-page") || "");
+      if (page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
+      if (page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+    } catch (_) {}
+  });
   sanitizeAllPockets();
   runMidnightResetIfNeeded();
   scheduleMidnightResetTick();
