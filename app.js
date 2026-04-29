@@ -66,6 +66,20 @@ function scheduleStudentsFirestoreSync(){
   clearTimeout(__sebitStudentsSyncTimer);
   __sebitStudentsSyncTimer = setTimeout(syncStudentsToFirestoreNow, 500);
 }
+
+async function syncOneStudentToFirestoreNow(student){
+  try{
+    const s = normalizeStudentForFirestore(student);
+    if(!s.id) return;
+    const batch = writeBatch(db);
+    batch.set(doc(db, FS_COLLECTIONS.students, fsStudentDocId(s.id)), s, { merge:false });
+    await batch.commit();
+    console.log("[SEBIT] one student synced to Firestore", s.id, s.lumen, s.xp);
+  }catch(err){
+    console.error("[SEBIT] one student Firestore sync failed", err);
+  }
+}
+
 async function loadStudentsFromFirestore(){
   try{
     __sebitStudentsLoadingFromFirestore = true;
@@ -310,9 +324,16 @@ function applyPenaltyToStudent(studentId, lumenMinus, xpMinus){
   const st = readJSON(LS.students, []);
   const idx = st.findIndex(s=>String(s.id)===String(studentId));
   if(idx<0) return false;
-  st[idx].lumen = Number(st[idx].lumen||0) - Math.abs(Number(lumenMinus)||0);
-  st[idx].xp = Number(st[idx].xp||0) - Math.abs(Number(xpMinus)||0);
+
+  const beforeLumen = Number(st[idx].lumen||0);
+  const beforeXp = Number(st[idx].xp||0);
+  st[idx].lumen = beforeLumen - Math.abs(Number(lumenMinus)||0);
+  st[idx].xp = beforeXp - Math.abs(Number(xpMinus)||0);
+  st[idx].updatedAt = Date.now();
+
+  // 로컬 화면 즉시 반영 + Firebase students 문서도 즉시 반영
   writeJSON(LS.students, st);
+  try { syncOneStudentToFirestoreNow(st[idx]); } catch(_) {}
   return true;
 }
 function revertPenaltyToStudent(studentId, lumenMinus, xpMinus){
@@ -320,9 +341,16 @@ function revertPenaltyToStudent(studentId, lumenMinus, xpMinus){
   const st = readJSON(LS.students, []);
   const idx = st.findIndex(s=>String(s.id)===String(studentId));
   if(idx<0) return false;
-  st[idx].lumen = Number(st[idx].lumen||0) + Math.abs(Number(lumenMinus)||0);
-  st[idx].xp = Number(st[idx].xp||0) + Math.abs(Number(xpMinus)||0);
+
+  const beforeLumen = Number(st[idx].lumen||0);
+  const beforeXp = Number(st[idx].xp||0);
+  st[idx].lumen = beforeLumen + Math.abs(Number(lumenMinus)||0);
+  st[idx].xp = beforeXp + Math.abs(Number(xpMinus)||0);
+  st[idx].updatedAt = Date.now();
+
+  // 벌점 취소/되돌리기도 Firebase students 문서에 즉시 반영
   writeJSON(LS.students, st);
+  try { syncOneStudentToFirestoreNow(st[idx]); } catch(_) {}
   return true;
 }
 
