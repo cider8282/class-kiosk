@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <title>SEBIT Light World</title>
   <link rel="stylesheet" href="style.css"/>
-<script type="module" src="app.js"></script>
 </head>
 <body>
   <div class="app">
@@ -1094,6 +1093,25 @@
 
 <!-- SEBIT Safety: localStorage backup tool -->
 <a href="backup_tool.html" style="position:fixed; right:14px; bottom:14px; z-index:9999; text-decoration:none;" class="btn small">백업</a>
+
+
+<!-- Firebase (iPad Safari 호환 방식: compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyCKcYXyywiJuThbboYZDtHSbmhwGyj5Vpo",
+    authDomain: "sebit-class-2026.firebaseapp.com",
+    projectId: "sebit-class-2026",
+    storageBucket: "sebit-class-2026.firebasestorage.app",
+    messagingSenderId: "255915011407",
+    appId: "1:255915011407:web:e38e2dccc175226a9da93a"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+</script>
+<script src="app.js"></script>
 
 </body>
 </html>

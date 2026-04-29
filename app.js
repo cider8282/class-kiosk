@@ -1,20 +1,29 @@
-// Firebase 연결
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, writeBatch, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-// Firebase 설정
-const firebaseConfig = {
-  apiKey: "AIzaSyCKcYXyywiJuThbboYZDtHSbmhwGyj5Vpo",
-  authDomain: "sebit-class-2026.firebaseapp.com",
-  projectId: "sebit-class-2026",
-  storageBucket: "sebit-class-2026.firebasestorage.app",
-  messagingSenderId: "255915011407",
-  appId: "1:255915011407:web:e38e2dccc175226a9da93a"
-};
-
-// 초기화
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Firebase 연결은 index.html의 compat script에서 처리함 (iPad Safari 호환)
+// 기존 modular 코드 형태를 유지하기 위한 compat 래퍼
+function collection(dbObj, collectionName){
+  return dbObj.collection(collectionName);
+}
+function doc(dbObj, collectionName, docId){
+  return dbObj.collection(collectionName).doc(docId);
+}
+async function getDocs(collectionRef){
+  const snap = await collectionRef.get();
+  return {
+    docs: snap.docs,
+    forEach: (callback) => snap.forEach(callback)
+  };
+}
+function writeBatch(dbObj){
+  const batch = dbObj.batch();
+  return {
+    set: (ref, data, options) => batch.set(ref, data, options),
+    delete: (ref) => batch.delete(ref),
+    commit: () => batch.commit()
+  };
+}
+function onSnapshot(ref, next, error){
+  return ref.onSnapshot(next, error);
+}
 
 /* === Firestore sync: students + lumen/xp (1단계) ===
    - 화면은 기존 localStorage를 그대로 읽음
