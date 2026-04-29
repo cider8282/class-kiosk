@@ -11106,3 +11106,148 @@ function closeStudentShopPreviewModal(){
     }
   }, true);
 })();
+
+
+/* =========================================================
+   SEBIT FINAL STABILIZER: jobs + shop realtime (iPad safe)
+   - 직업 localStorage 키를 더 넓게 감지해 Firestore jobState에 저장
+   - 상점 sharedState 변경 시 학생/교사 화면을 강제로 다시 그림
+   - 직업 배정 변경 시 students[].jobs도 같이 반영해 학생 화면에 즉시 표시
+   ========================================================= */
+(function(){
+  if(window.__sebitFinalJobsShopStabilizerInstalled) return;
+  window.__sebitFinalJobsShopStabilizerInstalled = true;
+
+  const FINAL_FIXED_JOBS = [
+    { id:"ranger", name:"교실 레인저" },
+    { id:"fairjustice", name:"페어 저스티스" },
+    { id:"timekeeper", name:"타임 키퍼" },
+    { id:"techkeeper", name:"테크 키퍼" },
+    { id:"studycheck", name:"학습 체크단" },
+    { id:"tidymaster", name:"정리 마스터" },
+    { id:"lightguardian_front", name:"빛의 파수꾼(앞)" },
+    { id:"lightguardian_back",  name:"빛의 파수꾼(뒤)" },
+    { id:"artcurator", name:"작품 큐레이터" },
+    { id:"greensaver", name:"그린 세이버" },
+    { id:"docmaster", name:"문서 마스터" },
+    { id:"weathercaster", name:"웨더 캐스터" },
+    { id:"lunchsaver", name:"런치 세이버" },
+    { id:"lightmerchant", name:"빛의 상인" }
+  ];
+
+  window.sebitFinalDeriveStudentJobsFromAssign = function(){
+    try{
+      const raw = localStorage.getItem("sebit:jobsAssign_v1");
+      if(!raw) return false;
+      const assign = JSON.parse(raw || '{"version":1,"jobs":{}}');
+      const st = JSON.parse(localStorage.getItem("sebit:students") || "[]");
+      if(!Array.isArray(st)) return false;
+      const byId = new Map(st.map(s=>[String(s.id||""), s]));
+      st.forEach(s=>{ s.jobs = []; });
+      FINAL_FIXED_JOBS.forEach(j=>{
+        const cur = assign && assign.jobs ? assign.jobs[j.id] : null;
+        const holders = Array.isArray(cur && cur.holders) ? cur.holders : [];
+        holders.forEach(hid=>{
+          const s = byId.get(String(hid));
+          if(!s) return;
+          if(!Array.isArray(s.jobs)) s.jobs = [];
+          if(!s.jobs.includes(j.name)) s.jobs.push(j.name);
+        });
+      });
+      localStorage.setItem("sebit:students", JSON.stringify(st));
+      try{ if(typeof syncStudentsToFirestoreNow === "function") syncStudentsToFirestoreNow(); }catch(_){ }
+      return true;
+    }catch(err){ console.warn("[SEBIT FINAL] derive jobs -> students skipped", err); return false; }
+  };
+
+  window.sebitFinalRefreshShopScreens = function(){
+    try{
+      const page = String(document.body.getAttribute("data-page") || "");
+      if(page === "student-shop" && typeof renderStudentShop === "function") renderStudentShop();
+      if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
+      if(typeof renderTeacherHome === "function" && page === "teacher-home") renderTeacherHome();
+      if(typeof renderStudentShell === "function" && page.startsWith("student-")) renderStudentShell();
+      if(String(location.hash || "") === "#admin-shop" && typeof openAdminModal === "function") {
+        openAdminModal({ key:"shop", title:"상점 관리" });
+      }
+    }catch(err){ console.warn("[SEBIT FINAL] shop refresh skipped", err); }
+  };
+
+  window.sebitFinalRefreshJobScreens = function(){
+    try{
+      const page = String(document.body.getAttribute("data-page") || "");
+      if(typeof renderStudentShell === "function" && page.startsWith("student-")) renderStudentShell();
+      if(typeof renderStudentHomeV1 === "function" && page === "student-home") renderStudentHomeV1();
+      if(typeof renderTeacherStudents === "function" && page === "teacher-students") renderTeacherStudents();
+      if(typeof renderTeacherHome === "function" && page === "teacher-home") renderTeacherHome();
+      if(String(location.hash || "") === "#admin-jobs" && typeof openAdminModal === "function") openAdminModal({ key:"jobs", title:"직업 관리" });
+      if(String(location.hash || "") === "#admin-job-status" && typeof openAdminModal === "function") openAdminModal({ key:"job-status", title:"직업 수행현황 관리" });
+    }catch(err){ console.warn("[SEBIT FINAL] job refresh skipped", err); }
+  };
+
+  window.sebitFinalIsJobKey = function(key){
+    const k = String(key || "");
+    if(k === "sebit:jobsConfig_v1" || k === "sebit:jobsAssign_v1" || k === "sebit:jobsSession_v1" ||
+       k === "sebit:jobsNonregular_v1" || k === "sebit:jobsParttime_v1" ||
+       k === "sebit:jobsAssignConfirmed_v1" || k === "sebit:jobsResetDone_v1") return true;
+    return k.startsWith("sebit_jobdone_") || k.startsWith("sebit_studycheck_") ||
+           k.startsWith("sebit_tidymaster_") || k.startsWith("sebit_artcurator_") ||
+           k.startsWith("sebit_greensaver_") || k.startsWith("sebit_lunchsaver_") ||
+           k.startsWith("sebit_weathercaster_") || k.startsWith("sebit_lightmerchant_") ||
+           k.startsWith("sebit_techkeeper_") || k.startsWith("sebit_timekeeper_") ||
+           k.startsWith("sebit_docmaster_") || k.startsWith("sebit_ranger_") ||
+           k.startsWith("sebit_fairjustice_") || k.includes("job") || k.includes("Job");
+  };
+
+  try{ window.isSebitJobStorageKey = window.sebitFinalIsJobKey; }catch(_){ }
+  try{ window.refreshShopPagesFromRealtime = window.sebitFinalRefreshShopScreens; }catch(_){ }
+  try{ window.refreshJobPagesFromRealtime = window.sebitFinalRefreshJobScreens; }catch(_){ }
+
+  const prevSet = Storage.prototype.setItem;
+  const prevRemove = Storage.prototype.removeItem;
+  Storage.prototype.setItem = function(key, value){
+    const ret = prevSet.apply(this, arguments);
+    try{
+      if(this === window.localStorage){
+        const k = String(key || "");
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(k)){
+          if(typeof scheduleShopFirestoreSync === "function") scheduleShopFirestoreSync();
+          setTimeout(window.sebitFinalRefreshShopScreens, 80);
+        }
+        if(window.sebitFinalIsJobKey(k)){
+          if(k === "sebit:jobsAssign_v1") setTimeout(window.sebitFinalDeriveStudentJobsFromAssign, 30);
+          if(typeof scheduleJobFirestoreSync === "function") scheduleJobFirestoreSync(k);
+          setTimeout(window.sebitFinalRefreshJobScreens, 100);
+        }
+      }
+    }catch(err){ console.warn("[SEBIT FINAL] setItem hook skipped", err); }
+    return ret;
+  };
+  Storage.prototype.removeItem = function(key){
+    const ret = prevRemove.apply(this, arguments);
+    try{
+      if(this === window.localStorage){
+        const k = String(key || "");
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(k)){
+          if(typeof scheduleShopFirestoreSync === "function") scheduleShopFirestoreSync();
+          setTimeout(window.sebitFinalRefreshShopScreens, 80);
+        }
+        if(window.sebitFinalIsJobKey(k)){
+          if(typeof scheduleJobFirestoreSync === "function") scheduleJobFirestoreSync(k);
+          setTimeout(window.sebitFinalRefreshJobScreens, 100);
+        }
+      }
+    }catch(err){ console.warn("[SEBIT FINAL] removeItem hook skipped", err); }
+    return ret;
+  };
+
+  window.addEventListener("load", function(){
+    setTimeout(function(){
+      try{ if(typeof syncShopStateToFirestoreNow === "function") syncShopStateToFirestoreNow(); }catch(_){ }
+      try{ if(typeof syncAllLocalJobStateToFirestoreNow === "function") syncAllLocalJobStateToFirestoreNow(); }catch(_){ }
+      try{ window.sebitFinalDeriveStudentJobsFromAssign(); }catch(_){ }
+      try{ window.sebitFinalRefreshShopScreens(); }catch(_){ }
+      try{ window.sebitFinalRefreshJobScreens(); }catch(_){ }
+    }, 1200);
+  });
+})();
