@@ -259,6 +259,149 @@ function startFirestoreRealtimeSync(){
     }, (err)=>{ console.error("[SEBIT] penaltyLogs realtime sync failed", err); });
   }catch(err){ console.error("[SEBIT] penaltyLogs realtime listener failed", err); }
 }
+
+/* === Firestore sync: shop + light pocket (3단계) ===
+   - 상점 상품, 라이트 포켓, 지급 요청/기록을 Firestore sharedState 문서로 공유
+   - 기존 화면은 localStorage를 그대로 읽고, 저장될 때 서버에 자동 반영
+*/
+const FS_SHARED_STATE_COLLECTION = "sharedState";
+const FS_SHOP_KEYS = [
+  "shopProducts",
+  "shopPurchaseLog",
+  "shopDailyCounter",
+  "lightPocket",
+  "lightMerchantRequests",
+  "lightMerchantHistory",
+  "lightMerchantClosed"
+];
+let __sebitShopLoadingFromFirestore = false;
+let __sebitShopSyncTimer = null;
+let __sebitShopRealtimeStarted = false;
+let __sebitUnsubShopState = null;
+
+function fsSharedStateDocId(name){ return String(name || "").trim(); }
+function fsShopKeyNameFromLSKey(key){
+  try{
+    if(typeof LS === "undefined") return "";
+    if(key === LS.shopProducts) return "shopProducts";
+    if(key === LS.shopPurchaseLog) return "shopPurchaseLog";
+    if(key === LS.shopDailyCounter) return "shopDailyCounter";
+    if(key === LS.lightPocket) return "lightPocket";
+    if(key === LS.lightMerchantRequests) return "lightMerchantRequests";
+    if(key === LS.lightMerchantHistory) return "lightMerchantHistory";
+    if(key === LS.lightMerchantClosed) return "lightMerchantClosed";
+  }catch(_){}
+  return "";
+}
+function fsShopLocalStorageKeyFromName(name){
+  try{
+    if(typeof LS === "undefined") return "";
+    const map = {
+      shopProducts: LS.shopProducts,
+      shopPurchaseLog: LS.shopPurchaseLog,
+      shopDailyCounter: LS.shopDailyCounter,
+      lightPocket: LS.lightPocket,
+      lightMerchantRequests: LS.lightMerchantRequests,
+      lightMerchantHistory: LS.lightMerchantHistory,
+      lightMerchantClosed: LS.lightMerchantClosed
+    };
+    return map[name] || "";
+  }catch(_){ return ""; }
+}
+function fsDefaultValueForShopKey(name){
+  if(name === "shopProducts" || name === "shopPurchaseLog" || name === "lightMerchantHistory") return [];
+  if(name === "lightMerchantClosed") return false;
+  return {};
+}
+function fsReadShopValue(name){
+  const key = fsShopLocalStorageKeyFromName(name);
+  if(!key) return fsDefaultValueForShopKey(name);
+  return readJSON(key, fsDefaultValueForShopKey(name));
+}
+async function syncShopStateToFirestoreNow(){
+  if(__sebitShopLoadingFromFirestore) return;
+  try{
+    const batch = writeBatch(db);
+    FS_SHOP_KEYS.forEach(name=>{
+      batch.set(doc(db, FS_SHARED_STATE_COLLECTION, fsSharedStateDocId(name)), {
+        key: name,
+        value: fsReadShopValue(name),
+        updatedAt: Date.now()
+      }, { merge:false });
+    });
+    await batch.commit();
+    console.log("[SEBIT] shop/pocket synced to Firestore");
+  }catch(err){ console.error("[SEBIT] shop/pocket Firestore sync failed", err); }
+}
+function scheduleShopFirestoreSync(){
+  if(__sebitShopLoadingFromFirestore) return;
+  clearTimeout(__sebitShopSyncTimer);
+  __sebitShopSyncTimer = setTimeout(syncShopStateToFirestoreNow, 500);
+}
+async function loadShopStateFromFirestore(){
+  try{
+    __sebitShopLoadingFromFirestore = true;
+    const snap = await getDocs(collection(db, FS_SHARED_STATE_COLLECTION));
+    const found = new Set();
+    snap.forEach(d=>{
+      const id = String(d.id || "");
+      if(!FS_SHOP_KEYS.includes(id)) return;
+      const data = d.data() || {};
+      const key = fsShopLocalStorageKeyFromName(id);
+      if(!key) return;
+      localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForShopKey(id)));
+      found.add(id);
+    });
+    let shouldUpload = false;
+    FS_SHOP_KEYS.forEach(name=>{
+      if(found.has(name)) return;
+      const key = fsShopLocalStorageKeyFromName(name);
+      if(key && localStorage.getItem(key) !== null) shouldUpload = true;
+    });
+    if(shouldUpload){
+      __sebitShopLoadingFromFirestore = false;
+      await syncShopStateToFirestoreNow();
+      __sebitShopLoadingFromFirestore = true;
+    }
+    console.log("[SEBIT] shop/pocket loaded from Firestore", found.size);
+  }catch(err){ console.error("[SEBIT] shop/pocket Firestore load failed", err); }
+  finally{ __sebitShopLoadingFromFirestore = false; }
+}
+function refreshShopPagesFromRealtime(){
+  try{
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page === "student-shop" && typeof renderStudentShop === "function") renderStudentShop();
+    if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
+    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+    if(typeof renderLightMerchantRequests === "function") renderLightMerchantRequests();
+    if(typeof renderShopAdmin === "function") renderShopAdmin();
+  }catch(err){ console.warn("[SEBIT] shop realtime refresh skipped", err); }
+}
+function startShopFirestoreRealtimeSync(){
+  if(__sebitShopRealtimeStarted) return;
+  __sebitShopRealtimeStarted = true;
+  try{
+    __sebitUnsubShopState = onSnapshot(collection(db, FS_SHARED_STATE_COLLECTION), (snap)=>{
+      __sebitShopLoadingFromFirestore = true;
+      let changed = false;
+      snap.forEach(d=>{
+        const id = String(d.id || "");
+        if(!FS_SHOP_KEYS.includes(id)) return;
+        const data = d.data() || {};
+        const key = fsShopLocalStorageKeyFromName(id);
+        if(!key) return;
+        localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForShopKey(id)));
+        changed = true;
+      });
+      __sebitShopLoadingFromFirestore = false;
+      if(changed){
+        console.log("[SEBIT] shop/pocket realtime updated");
+        refreshShopPagesFromRealtime();
+      }
+    }, (err)=>{ console.error("[SEBIT] shop/pocket realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] shop/pocket realtime listener failed", err); }
+}
+
 // --- utils: safe text ---
 function escapeHTML(str) {
   if (str === undefined || str === null) return '';
@@ -748,6 +891,9 @@ function writeJSON(key, val) {
   try {
     if (typeof LS !== "undefined" && key === LS.students) {
       scheduleStudentsFirestoreSync();
+    }
+    if (typeof FS_SHOP_KEYS !== "undefined" && fsShopKeyNameFromLSKey(key)) {
+      scheduleShopFirestoreSync();
     }
   } catch (_) {}
 }
@@ -9453,16 +9599,17 @@ function clearMeal(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore()]).then(() => {
-    // Firestore에서 학생명단/루멘/XP/벌점 기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
+      sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
       if (page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
       if (page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
       startFirestoreRealtimeSync();
+      startShopFirestoreRealtimeSync();
     } catch (_) {}
   });
-  sanitizeAllPockets();
   runMidnightResetIfNeeded();
   scheduleMidnightResetTick();
   // rule: always intro on load
