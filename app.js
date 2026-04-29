@@ -25,6 +25,106 @@ function onSnapshot(ref, next, error){
   return ref.onSnapshot(next, error);
 }
 
+/* === Firestore sync: constitution / law + penalty values (final) ===
+   - 기준 데이터: sharedState/constitution.value
+   - 교사 메뉴 세빛 헌법 저장값을 서버에 올림
+   - 학생 헌법 화면과 교실 레인저 체크리스트는 같은 localStorage 키를 읽으므로 서버 변경 즉시 같은 기준 적용
+*/
+const SEBIT_CONSTITUTION_DOC = "constitution";
+let __sebitConstitutionLoadingFromFirestore = false;
+let __sebitConstitutionSyncTimer = null;
+let __sebitConstitutionRealtimeStarted = false;
+let __sebitUnsubConstitution = null;
+
+function normalizeConstitutionForFirestore(state){
+  const fallback = (typeof DEFAULT_CONSTITUTION !== "undefined") ? JSON.parse(JSON.stringify(DEFAULT_CONSTITUTION)) : { version:1, categories:[] };
+  const st = (state && typeof state === "object") ? JSON.parse(JSON.stringify(state)) : fallback;
+  st.version = Number(st.version || fallback.version || 1);
+  if(!Array.isArray(st.categories)) st.categories = [];
+  st.categories.forEach(cat=>{
+    if(!cat || typeof cat !== "object") return;
+    if(!Array.isArray(cat.items)) cat.items = [];
+    cat.items.forEach((item, idx)=>{
+      if(!item || typeof item !== "object") return;
+      const n = Number(item.num || idx + 1);
+      item.num = n;
+      item.label = item.label || `제${n}조`;
+      item.id = String(item.id || `art_${n}`);
+      item.title = String(item.title || "");
+      item.desc = String(item.desc || "");
+      item.lumen = Math.max(0, Number(item.lumen || 0));
+      item.xp = Math.max(0, Number(item.xp || 0));
+      item.active = item.active === false ? false : true;
+    });
+  });
+  return st;
+}
+function readLocalConstitutionForFirestore(){
+  try{
+    const raw = localStorage.getItem("sebit_constitution_v1");
+    if(raw) return normalizeConstitutionForFirestore(JSON.parse(raw));
+  }catch(_){ }
+  return normalizeConstitutionForFirestore(typeof DEFAULT_CONSTITUTION !== "undefined" ? DEFAULT_CONSTITUTION : null);
+}
+async function syncConstitutionToFirestoreNow(){
+  if(__sebitConstitutionLoadingFromFirestore) return;
+  try{
+    const value = readLocalConstitutionForFirestore();
+    await doc(db, "sharedState", SEBIT_CONSTITUTION_DOC).set({ key: SEBIT_CONSTITUTION_DOC, value, updatedAt: Date.now() }, { merge:false });
+    console.log("[SEBIT] constitution synced to Firestore");
+  }catch(err){ console.error("[SEBIT] constitution Firestore sync failed", err); }
+}
+function scheduleConstitutionFirestoreSync(){
+  if(__sebitConstitutionLoadingFromFirestore) return;
+  clearTimeout(__sebitConstitutionSyncTimer);
+  __sebitConstitutionSyncTimer = setTimeout(syncConstitutionToFirestoreNow, 350);
+}
+async function loadConstitutionFromFirestore(){
+  try{
+    __sebitConstitutionLoadingFromFirestore = true;
+    const snap = await doc(db, "sharedState", SEBIT_CONSTITUTION_DOC).get();
+    if(snap.exists){
+      const data = snap.data() || {};
+      const value = normalizeConstitutionForFirestore(data.value || data);
+      localStorage.setItem("sebit_constitution_v1", JSON.stringify(value));
+      console.log("[SEBIT] constitution loaded from Firestore");
+    }else{
+      __sebitConstitutionLoadingFromFirestore = false;
+      await syncConstitutionToFirestoreNow();
+      __sebitConstitutionLoadingFromFirestore = true;
+    }
+  }catch(err){ console.error("[SEBIT] constitution Firestore load failed", err); }
+  finally{ __sebitConstitutionLoadingFromFirestore = false; }
+}
+function refreshConstitutionViewsFromRealtime(){
+  try{
+    const modal = document.getElementById("studentReadonlyViewModal");
+    if(modal){
+      const title = modal.querySelector(".student-view-title")?.textContent || "";
+      const body = modal.querySelector(".student-view-body");
+      if(body && title.includes("세빛 헌법") && typeof renderStudentConstitutionReadOnlyHTML === "function"){
+        body.innerHTML = renderStudentConstitutionReadOnlyHTML();
+      }
+    }
+  }catch(err){ console.warn("[SEBIT] constitution realtime refresh skipped", err); }
+}
+function startConstitutionFirestoreRealtimeSync(){
+  if(__sebitConstitutionRealtimeStarted) return;
+  __sebitConstitutionRealtimeStarted = true;
+  try{
+    __sebitUnsubConstitution = onSnapshot(doc(db, "sharedState", SEBIT_CONSTITUTION_DOC), (snap)=>{
+      if(!snap.exists) return;
+      const data = snap.data() || {};
+      const value = normalizeConstitutionForFirestore(data.value || data);
+      __sebitConstitutionLoadingFromFirestore = true;
+      localStorage.setItem("sebit_constitution_v1", JSON.stringify(value));
+      __sebitConstitutionLoadingFromFirestore = false;
+      console.log("[SEBIT] constitution realtime updated");
+      refreshConstitutionViewsFromRealtime();
+    }, (err)=>{ console.error("[SEBIT] constitution realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] constitution realtime listener failed", err); }
+}
+
 /* === Firestore sync: students + lumen/xp (1단계) ===
    - 화면은 기존 localStorage를 그대로 읽음
    - 학생명단/루멘/XP가 바뀌면 Firestore students 컬렉션에 자동 저장
@@ -3510,6 +3610,7 @@ function ensureStudentReadonlyViewStyles(){
     .student-poster-item:first-of-type{border-top:0;}
     .student-poster-item-title{font-weight:850; margin-bottom:5px;}
     .student-poster-item-desc{font-size:13px; color:#555; line-height:1.45;}
+    .student-poster-penalty{display:inline-flex; margin-top:8px; border-radius:999px; padding:6px 10px; background:#fff3cf; color:#7a5200; font-size:12px; font-weight:900;}
     .student-job-summary{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
     .student-job-pill{border-radius:999px; background:#fff; border:1px solid rgba(0,0,0,.08); padding:8px 12px; font-weight:800;}
     .student-job-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px;}
@@ -3556,8 +3657,9 @@ function renderStudentConstitutionReadOnlyHTML(){
         <div class="student-poster-cat-title">${escapeHTML(cat.name||'')}</div>
         ${items.length ? items.map((it, idx)=>`
           <div class="student-poster-item">
-            <div class="student-poster-item-title">제${idx+1}조 ${escapeHTML(it.title||'')}</div>
+            <div class="student-poster-item-title">${escapeHTML(it.label || `제${idx+1}조`)} ${escapeHTML(it.title||'')}</div>
             <div class="student-poster-item-desc">${escapeHTML(it.desc||'')}</div>
+            <div class="student-poster-penalty">벌점 기준: -${Number(it.lumen)||0} 루멘 / -${Number(it.xp)||0} XP</div>
           </div>
         `).join('') : `<div class="student-poster-item"><div class="student-poster-item-desc">표시할 조항이 없습니다.</div></div>`}
       </section>
@@ -3917,6 +4019,7 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
 
   const saveConstitutionState = (state) => {
     localStorage.setItem(LS_KEYS.constitution, JSON.stringify(normalizeConstitutionNumbering(state)));
+    try { scheduleConstitutionFirestoreSync(); } catch(_) {}
   };
 
   const renderConstitutionAdmin = (root) => {
@@ -4012,6 +4115,7 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
       resetBtn.addEventListener("click", ()=>{
         localStorage.removeItem(LS_KEYS.constitution);
         state = getConstitutionState();
+        saveConstitutionState(state);
         selectedCatId = state.categories?.[0]?.id || null;
         editingId = null;
         render();
@@ -9796,7 +9900,7 @@ function clearMeal(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore()]).then(() => {
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore()]).then(() => {
     // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
@@ -9806,6 +9910,7 @@ document.addEventListener("DOMContentLoaded", () => {
       startFirestoreRealtimeSync();
       startShopFirestoreRealtimeSync();
       startJobFirestoreRealtimeSync();
+      startConstitutionFirestoreRealtimeSync();
     } catch (_) {}
   });
   runMidnightResetIfNeeded();
@@ -11271,4 +11376,133 @@ function closeStudentShopPreviewModal(){
       try{ window.sebitFinalRefreshJobScreens(); }catch(_){ }
     }, 1200);
   });
+})();
+
+/* =========================================================
+   SEBIT EMERGENCY SHOP HYDRATOR v2
+   - Fix for mobile/iPad not showing shop products even when Firestore has sharedState/shopProducts.value
+   - Uses direct compat Firestore call and correct localStorage key: sebit:shopProducts
+   - Forces category to 전체 when products are present but current filter may hide them
+   ========================================================= */
+(function(){
+  if(window.__sebitEmergencyShopHydratorV2) return;
+  window.__sebitEmergencyShopHydratorV2 = true;
+
+  const SHOP_LS_KEY = "sebit:shopProducts";
+  const SHOP_CAT_KEY = "sebit:shopCat";
+
+  function safeProducts(){
+    try{
+      const arr = JSON.parse(localStorage.getItem(SHOP_LS_KEY) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    }catch(_){ return []; }
+  }
+
+  async function hydrateShopProducts(reason){
+    try{
+      if(!window.firebase || !firebase.firestore) return false;
+      const snap = await firebase.firestore().collection("sharedState").doc("shopProducts").get();
+      if(!snap.exists) return false;
+      const data = snap.data() || {};
+      const value = Array.isArray(data.value) ? data.value : [];
+      localStorage.setItem(SHOP_LS_KEY, JSON.stringify(value));
+      // legacy fallback key just in case an older screen reads it
+      localStorage.setItem("sebit_shopProducts", JSON.stringify(value));
+      if(value.length){
+        const selected = localStorage.getItem(SHOP_CAT_KEY) || "전체";
+        const cats = new Set(value.map(p => String((p && p.category) || "").trim()).filter(Boolean));
+        if(selected !== "전체" && !cats.has(selected)) localStorage.setItem(SHOP_CAT_KEY, "전체");
+      }
+      console.log("[SEBIT EMERGENCY] shopProducts hydrated", value.length, reason || "");
+      return true;
+    }catch(err){
+      console.error("[SEBIT EMERGENCY] shopProducts hydrate failed", err);
+      return false;
+    }
+  }
+
+  window.sebitHydrateShopProductsNow = hydrateShopProducts;
+
+  // Wrap renderStudentShop so every mobile entry gets Firestore data first if needed.
+  function installRenderWrapper(){
+    if(typeof window.renderStudentShop !== "function" || window.renderStudentShop.__sebitWrapped) return false;
+    const original = window.renderStudentShop;
+    const wrapped = function(){
+      const before = safeProducts();
+      // If phone has no products yet, fetch immediately and rerender after data arrives.
+      if(before.length === 0){
+        hydrateShopProducts("renderStudentShop-empty").then(ok=>{
+          if(ok){
+            try{ localStorage.setItem(SHOP_CAT_KEY, "전체"); }catch(_){}
+            try{ original(); }catch(e){ console.error("[SEBIT EMERGENCY] rerender shop failed", e); }
+          }
+        });
+      }else{
+        // Prevent hidden products due to stale category filter on mobile.
+        try{
+          const selected = localStorage.getItem(SHOP_CAT_KEY) || "전체";
+          if(selected !== "전체"){
+            const cats = new Set(before.map(p => String((p && p.category) || "").trim()).filter(Boolean));
+            if(!cats.has(selected)) localStorage.setItem(SHOP_CAT_KEY, "전체");
+          }
+        }catch(_){}
+      }
+      return original.apply(this, arguments);
+    };
+    wrapped.__sebitWrapped = true;
+    window.renderStudentShop = wrapped;
+    return true;
+  }
+
+  function refreshIfShopPage(reason){
+    try{
+      const page = String(document.body.getAttribute("data-page") || "");
+      if(page === "student-shop"){
+        hydrateShopProducts(reason).then(()=>{
+          try{ if(typeof window.renderStudentShop === "function") window.renderStudentShop(); }catch(e){}
+        });
+      }
+    }catch(_){}
+  }
+
+  // Direct realtime listener for the exact document.
+  function installDirectShopListener(){
+    try{
+      if(!window.firebase || !firebase.firestore || window.__sebitEmergencyShopDirectListener) return;
+      window.__sebitEmergencyShopDirectListener = true;
+      firebase.firestore().collection("sharedState").doc("shopProducts").onSnapshot(function(snap){
+        if(!snap.exists) return;
+        const data = snap.data() || {};
+        const value = Array.isArray(data.value) ? data.value : [];
+        localStorage.setItem(SHOP_LS_KEY, JSON.stringify(value));
+        localStorage.setItem("sebit_shopProducts", JSON.stringify(value));
+        console.log("[SEBIT EMERGENCY] direct shop snapshot", value.length);
+        try{ if(String(document.body.getAttribute("data-page")||"") === "student-shop" && typeof window.renderStudentShop === "function") window.renderStudentShop(); }catch(_){}
+      }, function(err){ console.error("[SEBIT EMERGENCY] direct shop snapshot failed", err); });
+    }catch(err){ console.error("[SEBIT EMERGENCY] direct listener install failed", err); }
+  }
+
+  window.addEventListener("load", function(){
+    let tries = 0;
+    const t = setInterval(function(){
+      tries++;
+      installRenderWrapper();
+      installDirectShopListener();
+      hydrateShopProducts("startup-" + tries).then(()=>refreshIfShopPage("startup-refresh"));
+      if(tries >= 8) clearInterval(t);
+    }, 700);
+  });
+
+  document.addEventListener("click", function(e){
+    const btn = e.target && e.target.closest ? e.target.closest("[data-go]") : null;
+    if(btn && btn.getAttribute("data-go") === "student-shop"){
+      setTimeout(function(){
+        installRenderWrapper();
+        installDirectShopListener();
+        refreshIfShopPage("click-student-shop");
+      }, 150);
+    }
+  }, true);
+
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden) refreshIfShopPage("visible"); });
 })();
