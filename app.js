@@ -1,6 +1,6 @@
 // Firebase 연결
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, getDocs, doc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, writeBatch, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 // Firebase 설정
 const firebaseConfig = {
@@ -187,6 +187,68 @@ async function loadPenaltyLogsFromFirestore(){
   }finally{
     __sebitPenaltyLoadingFromFirestore = false;
   }
+}
+
+/* === Firestore realtime sync: students + penaltyLogs (2-3단계) ===
+   - 다른 기기에서 학생 루멘/XP 또는 벌점 기록이 바뀌면 현재 기기 localStorage 캐시를 즉시 갱신
+   - 기존 화면 구조는 유지하고 필요한 화면만 다시 그림
+*/
+let __sebitRealtimeStarted = false;
+let __sebitUnsubStudents = null;
+let __sebitUnsubPenaltyLogs = null;
+
+function refreshCurrentSebitPageFromRealtime(){
+  try{
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+    if(page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
+    if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
+    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+    if(page === "student-dashboard" && typeof renderStudentDashboard === "function") renderStudentDashboard();
+    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
+    if(page === "student-shop" && typeof renderStudentShop === "function") renderStudentShop();
+    if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
+  }catch(err){ console.warn("[SEBIT] realtime refresh skipped", err); }
+}
+
+function startFirestoreRealtimeSync(){
+  if(__sebitRealtimeStarted) return;
+  __sebitRealtimeStarted = true;
+
+  try{
+    __sebitUnsubStudents = onSnapshot(collection(db, FS_COLLECTIONS.students), (snap)=>{
+      const fromCloud = [];
+      snap.forEach(d=>{
+        const data = d.data() || {};
+        fromCloud.push(normalizeStudentForFirestore({ ...data, id: data.id || decodeURIComponent(d.id) }));
+      });
+      fromCloud.sort((a,b)=>(Number(a.no)||0)-(Number(b.no)||0) || String(a.name).localeCompare(String(b.name), "ko"));
+      if(fromCloud.length > 0){
+        __sebitStudentsLoadingFromFirestore = true;
+        localStorage.setItem(LS.students, JSON.stringify(fromCloud));
+        __sebitStudentsLoadingFromFirestore = false;
+        console.log("[SEBIT] students realtime updated", fromCloud.length);
+        refreshCurrentSebitPageFromRealtime();
+      }
+    }, (err)=>{ console.error("[SEBIT] students realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] students realtime listener failed", err); }
+
+  try{
+    __sebitUnsubPenaltyLogs = onSnapshot(collection(db, FS_COLLECTIONS.penaltyLogs), (snap)=>{
+      const fromCloud = [];
+      snap.forEach(d=>{
+        const data = d.data() || {};
+        const n = normalizePenaltyForFirestore({ ...data, id: data.id || decodeURIComponent(d.id) });
+        if(n) fromCloud.push(n);
+      });
+      fromCloud.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0));
+      __sebitPenaltyLoadingFromFirestore = true;
+      localStorage.setItem(LS_KEYS.penaltyStore, JSON.stringify({ version:2, logs:fromCloud }));
+      __sebitPenaltyLoadingFromFirestore = false;
+      console.log("[SEBIT] penaltyLogs realtime updated", fromCloud.length);
+      refreshCurrentSebitPageFromRealtime();
+    }, (err)=>{ console.error("[SEBIT] penaltyLogs realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] penaltyLogs realtime listener failed", err); }
 }
 // --- utils: safe text ---
 function escapeHTML(str) {
@@ -9388,6 +9450,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const page = String(document.body.getAttribute("data-page") || "");
       if (page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
       if (page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+      startFirestoreRealtimeSync();
     } catch (_) {}
   });
   sanitizeAllPockets();
