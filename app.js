@@ -402,6 +402,198 @@ function startShopFirestoreRealtimeSync(){
   }catch(err){ console.error("[SEBIT] shop/pocket realtime listener failed", err); }
 }
 
+
+/* === Firestore sync: jobs + job checklists (4단계) ===
+   - 직업 배정/설정/세션과 직업 체크리스트 기록을 Firestore jobState 컬렉션으로 공유
+   - localStorage를 쓰는 기존 직업 코드를 그대로 살리고, 저장/삭제를 감지해 서버에 반영
+*/
+const FS_JOB_STATE_COLLECTION = "jobState";
+const FS_JOB_FIXED_KEYS = [
+  "sebit:jobsConfig_v1",
+  "sebit:jobsAssign_v1",
+  "sebit:jobsSession_v1",
+  "sebit:jobsNonregular_v1",
+  "sebit:jobsParttime_v1"
+];
+const FS_JOB_PREFIXES = [
+  "sebit_jobdone_",
+  "sebit_studycheck_",
+  "sebit_studycheck_closed_",
+  "sebit_tidymaster_",
+  "sebit_tidymaster_closed_",
+  "sebit_artcurator_",
+  "sebit_artcurator_closed_",
+  "sebit_artcurator_praise_",
+  "sebit_greensaver_",
+  "sebit_greensaver_closed_",
+  "sebit_lunchsaver_",
+  "sebit_lunchsaver_closed_",
+  "sebit_weathercaster_",
+  "sebit_weathercaster_closed_",
+  "sebit_lightmerchant_",
+  "sebit_lightmerchant_closed_",
+  "sebit_techkeeper_",
+  "sebit_techkeeper_closed_",
+  "sebit_timekeeper_",
+  "sebit_timekeeper_closed_",
+  "sebit_docmaster_",
+  "sebit_docmaster_closed_",
+  "sebit_ranger_",
+  "sebit_ranger_closed_",
+  "sebit_fairjustice_",
+  "sebit_fairjustice_closed_"
+];
+let __sebitJobLoadingFromFirestore = false;
+let __sebitJobRealtimeStarted = false;
+let __sebitUnsubJobState = null;
+let __sebitJobSyncTimer = null;
+const __sebitJobChangedKeys = new Set();
+
+function fsJobDocIdFromKey(key){
+  return encodeURIComponent(String(key || "")).replace(/\./g, "%2E");
+}
+function fsJobKeyFromDocId(id){
+  try{ return decodeURIComponent(String(id || "")); }catch(_){ return String(id || ""); }
+}
+function isSebitJobStorageKey(key){
+  const k = String(key || "");
+  if(FS_JOB_FIXED_KEYS.includes(k)) return true;
+  return FS_JOB_PREFIXES.some(p => k.startsWith(p));
+}
+function getExistingJobStorageKeys(){
+  const keys = [];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(isSebitJobStorageKey(k)) keys.push(k);
+    }
+  }catch(_){ }
+  return keys;
+}
+async function syncJobKeysToFirestoreNow(keys){
+  if(__sebitJobLoadingFromFirestore) return;
+  const list = Array.from(new Set((keys || []).filter(isSebitJobStorageKey)));
+  if(!list.length) return;
+  try{
+    const batch = writeBatch(db);
+    list.forEach(key=>{
+      const raw = localStorage.getItem(key);
+      const ref = doc(db, FS_JOB_STATE_COLLECTION, fsJobDocIdFromKey(key));
+      if(raw === null){
+        batch.delete(ref);
+      }else{
+        batch.set(ref, { key, raw, updatedAt: Date.now() }, { merge:false });
+      }
+    });
+    await batch.commit();
+    console.log("[SEBIT] job state synced to Firestore", list.length);
+  }catch(err){ console.error("[SEBIT] job state Firestore sync failed", err); }
+}
+function scheduleJobFirestoreSync(key){
+  if(__sebitJobLoadingFromFirestore) return;
+  if(!isSebitJobStorageKey(key)) return;
+  __sebitJobChangedKeys.add(String(key));
+  clearTimeout(__sebitJobSyncTimer);
+  __sebitJobSyncTimer = setTimeout(()=>{
+    const keys = Array.from(__sebitJobChangedKeys);
+    __sebitJobChangedKeys.clear();
+    syncJobKeysToFirestoreNow(keys);
+  }, 500);
+}
+async function syncAllLocalJobStateToFirestoreNow(){
+  await syncJobKeysToFirestoreNow(getExistingJobStorageKeys());
+}
+async function loadJobStateFromFirestore(){
+  try{
+    __sebitJobLoadingFromFirestore = true;
+    const snap = await getDocs(collection(db, FS_JOB_STATE_COLLECTION));
+    let count = 0;
+    snap.forEach(d=>{
+      const data = d.data() || {};
+      const key = String(data.key || fsJobKeyFromDocId(d.id));
+      if(!isSebitJobStorageKey(key)) return;
+      if(data.raw === null || data.deleted === true){
+        localStorage.removeItem(key);
+      }else{
+        localStorage.setItem(key, String(data.raw ?? ""));
+      }
+      count++;
+    });
+    console.log("[SEBIT] job state loaded from Firestore", count);
+    if(count === 0){
+      __sebitJobLoadingFromFirestore = false;
+      await syncAllLocalJobStateToFirestoreNow();
+      __sebitJobLoadingFromFirestore = true;
+    }
+  }catch(err){ console.error("[SEBIT] job state Firestore load failed", err); }
+  finally{ __sebitJobLoadingFromFirestore = false; }
+}
+function refreshJobPagesFromRealtime(){
+  try{
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
+    if(page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
+    if(String(location.hash || "") === "#admin-jobs" && typeof openAdminModal === "function") openAdminModal({ key:"jobs", title:"직업 관리" });
+    if(String(location.hash || "") === "#admin-job-status" && typeof openAdminModal === "function") openAdminModal({ key:"job-status", title:"직업 수행 현황 관리" });
+  }catch(err){ console.warn("[SEBIT] job realtime refresh skipped", err); }
+}
+function startJobFirestoreRealtimeSync(){
+  if(__sebitJobRealtimeStarted) return;
+  __sebitJobRealtimeStarted = true;
+  try{
+    __sebitUnsubJobState = onSnapshot(collection(db, FS_JOB_STATE_COLLECTION), (snap)=>{
+      __sebitJobLoadingFromFirestore = true;
+      let changed = false;
+      snap.forEach(d=>{
+        const data = d.data() || {};
+        const key = String(data.key || fsJobKeyFromDocId(d.id));
+        if(!isSebitJobStorageKey(key)) return;
+        if(data.raw === null || data.deleted === true){
+          localStorage.removeItem(key);
+        }else{
+          localStorage.setItem(key, String(data.raw ?? ""));
+        }
+        changed = true;
+      });
+      __sebitJobLoadingFromFirestore = false;
+      if(changed){
+        console.log("[SEBIT] job state realtime updated");
+        refreshJobPagesFromRealtime();
+      }
+    }, (err)=>{ console.error("[SEBIT] job state realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] job realtime listener failed", err); }
+}
+
+/* localStorage 직접 저장도 Firestore에 반영되게 감지함 */
+(function installSebitLocalStorageSyncHooks(){
+  if(window.__sebitLocalStorageSyncHookInstalled) return;
+  window.__sebitLocalStorageSyncHookInstalled = true;
+  const originalSetItem = Storage.prototype.setItem;
+  const originalRemoveItem = Storage.prototype.removeItem;
+  Storage.prototype.setItem = function(key, value){
+    const ret = originalSetItem.apply(this, arguments);
+    try{
+      if(this === window.localStorage){
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
+        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
+      }
+    }catch(_){ }
+    return ret;
+  };
+  Storage.prototype.removeItem = function(key){
+    const ret = originalRemoveItem.apply(this, arguments);
+    try{
+      if(this === window.localStorage){
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
+        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
+      }
+    }catch(_){ }
+    return ret;
+  };
+})();
+
 // --- utils: safe text ---
 function escapeHTML(str) {
   if (str === undefined || str === null) return '';
@@ -9599,8 +9791,8 @@ function clearMeal(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore()]).then(() => {
-    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
@@ -9608,6 +9800,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
       startFirestoreRealtimeSync();
       startShopFirestoreRealtimeSync();
+      startJobFirestoreRealtimeSync();
     } catch (_) {}
   });
   runMidnightResetIfNeeded();
