@@ -25,6 +25,75 @@ function onSnapshot(ref, next, error){
   return ref.onSnapshot(next, error);
 }
 
+
+/* === Firestore sync: teacher password / master code (security final) ===
+   - 기준 데이터: sharedState/teacherAuth
+   - 새 기기에서도 교사 비밀번호가 초기값으로 돌아가지 않게 서버값을 먼저 사용
+   - 기존 localStorage 값은 캐시로만 사용
+*/
+const SEBIT_AUTH_DOC = "teacherAuth";
+let __sebitTeacherAuthLoading = false;
+let __sebitTeacherAuthLoadedOnce = false;
+let __sebitTeacherAuthSyncTimer = null;
+
+function sebitDocExists(snap){
+  try{ return (typeof snap.exists === "function") ? snap.exists() : !!snap.exists; }
+  catch(_){ return false; }
+}
+function readLocalTeacherAuth(){
+  let teacherPw = "";
+  let masterCodeHash = "";
+  try{ teacherPw = String(localStorage.getItem("sebit:teacherPassword") || "").trim(); }catch(_){ }
+  try{ masterCodeHash = String(localStorage.getItem("sebit:masterCodeHash") || "").trim(); }catch(_){ }
+  return { teacherPw, masterCodeHash };
+}
+async function syncTeacherAuthToFirestoreNow(){
+  if(__sebitTeacherAuthLoading) return;
+  try{
+    const local = readLocalTeacherAuth();
+    if(!local.teacherPw) return;
+    await doc(db, "sharedState", SEBIT_AUTH_DOC).set({
+      key: SEBIT_AUTH_DOC,
+      teacherPw: local.teacherPw,
+      masterCodeHash: local.masterCodeHash || "",
+      updatedAt: Date.now()
+    }, { merge:false });
+    console.log("[SEBIT] teacher auth synced to Firestore");
+  }catch(err){ console.error("[SEBIT] teacher auth sync failed", err); }
+}
+function scheduleTeacherAuthFirestoreSync(){
+  clearTimeout(__sebitTeacherAuthSyncTimer);
+  __sebitTeacherAuthSyncTimer = setTimeout(syncTeacherAuthToFirestoreNow, 250);
+}
+async function loadTeacherAuthFromFirestore(){
+  try{
+    __sebitTeacherAuthLoading = true;
+    const snap = await doc(db, "sharedState", SEBIT_AUTH_DOC).get();
+    if(sebitDocExists(snap)){
+      const data = snap.data() || {};
+      if(data.teacherPw){ localStorage.setItem("sebit:teacherPassword", String(data.teacherPw)); }
+      if(data.masterCodeHash){ localStorage.setItem("sebit:masterCodeHash", String(data.masterCodeHash)); }
+      console.log("[SEBIT] teacher auth loaded from Firestore");
+    }else{
+      // 서버 비밀번호가 아직 없으면, 이 기기에 이미 저장된 비밀번호가 있을 때만 최초 업로드한다.
+      const local = readLocalTeacherAuth();
+      if(local.teacherPw){
+        __sebitTeacherAuthLoading = false;
+        await syncTeacherAuthToFirestoreNow();
+        __sebitTeacherAuthLoading = true;
+      }
+    }
+  }catch(err){ console.error("[SEBIT] teacher auth load failed", err); }
+  finally{
+    __sebitTeacherAuthLoading = false;
+    __sebitTeacherAuthLoadedOnce = true;
+  }
+}
+async function getTeacherPasswordForLogin(){
+  await loadTeacherAuthFromFirestore();
+  const local = readLocalTeacherAuth();
+  return local.teacherPw || "";
+}
 /* === Firestore sync: constitution / law + penalty values (final) ===
    - 기준 데이터: sharedState/constitution.value
    - 교사 메뉴 세빛 헌법 저장값을 서버에 올림
@@ -518,10 +587,7 @@ const FS_JOB_FIXED_KEYS = [
   "sebit:jobsAssign_v1",
   "sebit:jobsSession_v1",
   "sebit:jobsNonregular_v1",
-  "sebit:jobsParttime_v1",
-  "sebit:jobRewardPaid_v1",
-  "sebit:modelCitizenReward_v1",
-  "sebit:modelCitizenPaid_v1"
+  "sebit:jobsParttime_v1"
 ];
 const FS_JOB_PREFIXES = [
   "sebit_jobdone_",
@@ -2047,7 +2113,7 @@ function pushSystemLog(line) {
 
 function ensureSeed() {
   const pw = localStorage.getItem(LS.teacherPw);
-  if (!pw) localStorage.setItem(LS.teacherPw, DEFAULT_TEACHER_PW);
+  if (!pw) { /* teacher password will be loaded from Firestore */ }
 
   const students = readJSON(LS.students, null);
   if (!students || !Array.isArray(students)) {
@@ -2829,9 +2895,6 @@ function renderStudentHomeV1(){
     }
   }
 
-  // personal penalty log button (always visible, independent of model-citizen status)
-  try { ensureStudentPenaltyLogButton(); } catch(_) {}
-
   // bank info
   const bankBal = $("#studentBankBalance");
   const bankD = $("#studentBankDday");
@@ -3604,7 +3667,7 @@ function escapeHtml(str) {
     .replaceAll("'","&#039;");
 }
 
-function onTeacherLogin() {
+async function onTeacherLogin() {
   const input = $("#teacherPwInput");
   const err = $("#teacherLoginError");
   const raw = (input?.value || "").trim();
@@ -3614,7 +3677,11 @@ function onTeacherLogin() {
     return;
   }
 
-  const saved = localStorage.getItem(LS.teacherPw) || DEFAULT_TEACHER_PW;
+  const saved = await getTeacherPasswordForLogin();
+  if (!saved) {
+    err.textContent = "교사 비밀번호가 아직 서버에 설정되지 않았습니다. 기존 교사 PC에서 먼저 접속해 주세요.";
+    return;
+  }
   if (raw !== saved) {
     err.textContent = "비밀번호가 올바르지 않습니다.";
     return;
@@ -3873,103 +3940,6 @@ function openStudentReadonlyModal(title, bodyHTML){
   modal.addEventListener('click', (e)=>{ if(e.target===modal) modal.remove(); });
   modal.querySelector('.student-view-close')?.addEventListener('click', ()=> modal.remove());
   document.body.appendChild(modal);
-}
-
-
-
-/* === Student personal penalty log viewer (read-only, session-independent) ===
-   - 모범 시민 진행/탈락 여부와 관계없이 학생 본인의 penaltyLogs 전체 중 최신 10개를 직접 조회
-   - 버튼을 누를 때 Firestore에서 1회 읽어와 캐시 상태와 무관하게 표시
-*/
-function sebitNormId(v){ return String(v || '').trim().toUpperCase(); }
-function sebitPenaltyBelongsToStudent(log, student){
-  if(!log || !student) return false;
-  const sid = sebitNormId(student.id);
-  const lid = sebitNormId(log.studentId || log.sid || log.studentID);
-  if(sid && lid && sid === lid) return true;
-  const sname = String(student.name || '').trim();
-  const lname = String(log.studentName || log.name || '').trim();
-  return !!(sname && lname && sname === lname);
-}
-function sebitFormatTs(ts){
-  const n = Number(ts || 0);
-  if(!n) return '';
-  try{
-    const d = new Date(n);
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    const da = String(d.getDate()).padStart(2,'0');
-    const hh = String(d.getHours()).padStart(2,'0');
-    const mm = String(d.getMinutes()).padStart(2,'0');
-    return `${y}-${m}-${da} ${hh}:${mm}`;
-  }catch(_){ return ''; }
-}
-async function sebitFetchMyPenaltyLogsDirect(){
-  const me = (typeof getMe === 'function') ? getMe() : null;
-  if(!me) return [];
-  const out = [];
-  try{
-    const snap = await getDocs(collection(db, FS_COLLECTIONS.penaltyLogs));
-    snap.forEach(d=>{
-      const raw = d.data ? (d.data() || {}) : {};
-      const log = (typeof normalizePenaltyLog === 'function') ? normalizePenaltyLog({ ...raw, id: raw.id || d.id }) : { ...raw, id: raw.id || d.id };
-      if(log && sebitPenaltyBelongsToStudent(log, me)) out.push(log);
-    });
-  }catch(err){
-    console.error('[SEBIT] my penalty logs direct fetch failed', err);
-    throw err;
-  }
-  return out.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0)).slice(0,10);
-}
-function sebitRenderMyPenaltyLogsHTML(logs){
-  const arr = Array.isArray(logs) ? logs : [];
-  if(!arr.length){
-    return `<div class="muted" style="padding:10px 2px; line-height:1.6;">현재 벌점 기록이 없습니다.</div>`;
-  }
-  return `<div style="display:grid; gap:10px;">${arr.map(l=>{
-    const canceled = String(l.status || 'applied') === 'canceled';
-    const title = l.ruleTitle || l.articleTitle || l.articleText || '벌점 기록';
-    const date = l.date || sebitFormatTs(l.ts);
-    const lumen = Math.abs(Number(l.lumen || 0));
-    const xp = Math.abs(Number(l.xp || 0));
-    return `<div style="border:1px solid rgba(0,0,0,.08); background:rgba(255,255,255,.78); border-radius:16px; padding:12px 13px;">
-      <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
-        <div style="font-weight:900; color:#222;">${escapeHTML(title)}</div>
-        ${canceled ? `<span style="white-space:nowrap; border-radius:999px; padding:4px 8px; background:#eee; color:#666; font-size:12px; font-weight:900;">취소됨</span>` : ``}
-      </div>
-      <div class="muted small" style="margin-top:6px;">-${lumen} 루멘 / -${xp} XP</div>
-      <div class="muted small" style="margin-top:3px;">${escapeHTML(date)}</div>
-    </div>`;
-  }).join('')}</div>`;
-}
-async function openMyPenaltyLogsModal(){
-  openStudentReadonlyModal('내 최근 벌점 기록', `<div class="muted">불러오는 중...</div>`);
-  const modal = document.getElementById('studentReadonlyViewModal');
-  const body = modal?.querySelector('.student-view-body');
-  try{
-    const logs = await sebitFetchMyPenaltyLogsDirect();
-    if(body) body.innerHTML = sebitRenderMyPenaltyLogsHTML(logs);
-  }catch(err){
-    if(body) body.innerHTML = `<div class="muted" style="line-height:1.6;">벌점 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>`;
-  }
-}
-function ensureStudentPenaltyLogButton(){
-  const empty = document.getElementById('studentPenaltyEmpty');
-  const card = empty?.closest('.student-v1-card');
-  if(!card) return;
-  let btn = document.getElementById('studentMyPenaltyLogBtn');
-  if(!btn){
-    btn = document.createElement('button');
-    btn.id = 'studentMyPenaltyLogBtn';
-    btn.type = 'button';
-    btn.className = 'btn soft wide';
-    btn.textContent = '내 최근 벌점 기록 보기';
-    btn.style.marginTop = '10px';
-    const list = document.getElementById('studentPenaltyList');
-    if(list && list.parentElement === card) list.insertAdjacentElement('afterend', btn);
-    else card.appendChild(btn);
-  }
-  btn.onclick = openMyPenaltyLogsModal;
 }
 
 function renderStudentConstitutionReadOnlyHTML(){
@@ -4656,6 +4626,7 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
             const v = (inp.value||"").trim();
             if(!v) return;
             localStorage.setItem(LS.masterCodeHash, simpleHash(v));
+            try{ scheduleTeacherAuthFirestoreSync(); }catch(_){} 
             inp.value = "";
             render();
           });
@@ -4683,6 +4654,7 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
           if(curPw !== saved) { msg.textContent = "현재 비밀번호가 다름"; return; }
           if(!validateTeacherPw(newPw)) { msg.textContent = "영어+숫자 필요"; return; }
           localStorage.setItem(LS.teacherPw, newPw);
+          try{ scheduleTeacherAuthFirestoreSync(); }catch(_){} 
           cur.value=""; nw.value="";
           msg.textContent = "변경됨";
         });
@@ -4708,6 +4680,7 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
           if(simpleHash(code) !== h) { rmsg.textContent = "마스터 코드 불일치"; return; }
           if(!validateTeacherPw(newPw)) { rmsg.textContent = "영어+숫자 필요"; return; }
           localStorage.setItem(LS.teacherPw, newPw);
+          try{ scheduleTeacherAuthFirestoreSync(); }catch(_){} 
           mc.value=""; npw.value="";
           rmsg.textContent = "재설정됨";
         });
@@ -7856,24 +7829,16 @@ if(j.id==="docmaster"){
     const sessionKey = ()=> String((getJobSession().startedAt || 'no_session'));
     const addRewardToStudents = (items)=>{
       // items: [{sid,lumen,xp}]
-      // 직업/모범시민 보상은 학생 점수를 올린 뒤 Firestore students 문서에도 즉시 반영해야 함.
-      // 그렇지 않으면 다른 기기의 실시간 students 값이 다시 내려오면서 보상이 사라져 보일 수 있음.
       const st = readJSON(LS.students, []);
       let changed = 0;
-      const changedStudents = [];
       items.forEach(it=>{
         const idx = st.findIndex(s=>String(s.id)===String(it.sid));
         if(idx<0) return;
         st[idx].lumen = Number(st[idx].lumen||0) + Math.max(0, Number(it.lumen||0));
         st[idx].xp = Number(st[idx].xp||0) + Math.max(0, Number(it.xp||0));
-        st[idx].updatedAt = Date.now();
-        changedStudents.push({...st[idx]});
         changed++;
       });
       writeJSON(LS.students, st);
-      changedStudents.forEach(s=>{
-        try{ syncOneStudentToFirestoreNow(s); }catch(_){}
-      });
       return changed;
     };
     const payJobRewards = ()=>{
@@ -10264,7 +10229,6 @@ function sebitStopRealtimeListeners(reason="idle"){
   __sebitThermoRealtimeStarted = false;
   __sebitShopRealtimeStarted = false;
   __sebitJobRealtimeStarted = false;
-  try { __sebitActivityRealtimeStarted = false; } catch(_) {}
 
   console.log("[SEBIT GUARD] realtime stopped:", reason);
 }
@@ -10298,6 +10262,7 @@ async function sebitResumeRealtimeListeners(reason="activity"){
     window.__sebitRealtimePaused = false;
     // 꺼져 있던 동안 바뀐 내용을 1회만 읽어와서 화면을 최신화한 뒤 실시간 감시 재개
     await Promise.all([
+      loadTeacherAuthFromFirestore(),
       loadStudentsFromFirestore(),
       loadPenaltyLogsFromFirestore(),
       loadShopStateFromFirestore(),
@@ -10351,7 +10316,7 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
+  Promise.all([loadTeacherAuthFromFirestore(), loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
     // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
