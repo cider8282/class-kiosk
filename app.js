@@ -25,75 +25,6 @@ function onSnapshot(ref, next, error){
   return ref.onSnapshot(next, error);
 }
 
-
-/* === Firestore sync: teacher password / master code (security final) ===
-   - 기준 데이터: sharedState/teacherAuth
-   - 새 기기에서도 교사 비밀번호가 초기값으로 돌아가지 않게 서버값을 먼저 사용
-   - 기존 localStorage 값은 캐시로만 사용
-*/
-const SEBIT_AUTH_DOC = "teacherAuth";
-let __sebitTeacherAuthLoading = false;
-let __sebitTeacherAuthLoadedOnce = false;
-let __sebitTeacherAuthSyncTimer = null;
-
-function sebitDocExists(snap){
-  try{ return (typeof snap.exists === "function") ? snap.exists() : !!snap.exists; }
-  catch(_){ return false; }
-}
-function readLocalTeacherAuth(){
-  let teacherPw = "";
-  let masterCodeHash = "";
-  try{ teacherPw = String(localStorage.getItem("sebit:teacherPassword") || "").trim(); }catch(_){ }
-  try{ masterCodeHash = String(localStorage.getItem("sebit:masterCodeHash") || "").trim(); }catch(_){ }
-  return { teacherPw, masterCodeHash };
-}
-async function syncTeacherAuthToFirestoreNow(){
-  if(__sebitTeacherAuthLoading) return;
-  try{
-    const local = readLocalTeacherAuth();
-    if(!local.teacherPw) return;
-    await doc(db, "sharedState", SEBIT_AUTH_DOC).set({
-      key: SEBIT_AUTH_DOC,
-      teacherPw: local.teacherPw,
-      masterCodeHash: local.masterCodeHash || "",
-      updatedAt: Date.now()
-    }, { merge:false });
-    console.log("[SEBIT] teacher auth synced to Firestore");
-  }catch(err){ console.error("[SEBIT] teacher auth sync failed", err); }
-}
-function scheduleTeacherAuthFirestoreSync(){
-  clearTimeout(__sebitTeacherAuthSyncTimer);
-  __sebitTeacherAuthSyncTimer = setTimeout(syncTeacherAuthToFirestoreNow, 250);
-}
-async function loadTeacherAuthFromFirestore(){
-  try{
-    __sebitTeacherAuthLoading = true;
-    const snap = await doc(db, "sharedState", SEBIT_AUTH_DOC).get();
-    if(sebitDocExists(snap)){
-      const data = snap.data() || {};
-      if(data.teacherPw){ localStorage.setItem("sebit:teacherPassword", String(data.teacherPw)); }
-      if(data.masterCodeHash){ localStorage.setItem("sebit:masterCodeHash", String(data.masterCodeHash)); }
-      console.log("[SEBIT] teacher auth loaded from Firestore");
-    }else{
-      // 서버 비밀번호가 아직 없으면, 이 기기에 이미 저장된 비밀번호가 있을 때만 최초 업로드한다.
-      const local = readLocalTeacherAuth();
-      if(local.teacherPw){
-        __sebitTeacherAuthLoading = false;
-        await syncTeacherAuthToFirestoreNow();
-        __sebitTeacherAuthLoading = true;
-      }
-    }
-  }catch(err){ console.error("[SEBIT] teacher auth load failed", err); }
-  finally{
-    __sebitTeacherAuthLoading = false;
-    __sebitTeacherAuthLoadedOnce = true;
-  }
-}
-async function getTeacherPasswordForLogin(){
-  await loadTeacherAuthFromFirestore();
-  const local = readLocalTeacherAuth();
-  return local.teacherPw || "";
-}
 /* === Firestore sync: constitution / law + penalty values (final) ===
    - 기준 데이터: sharedState/constitution.value
    - 교사 메뉴 세빛 헌법 저장값을 서버에 올림
@@ -1438,6 +1369,97 @@ function uid(prefix="q"){
 const DEFAULT_TEACHER_PW = "sebit2026"; // 영어+숫자 (교사 설정에서 변경)
 const DEFAULT_PIN = "1234";
 
+
+/* === SEBIT Teacher Auth shared by Firebase (stable security final) ===
+   - QR/새 기기에서도 교사 비밀번호를 Firestore 기준으로 검사
+   - localStorage 기본값이 서버 비밀번호를 덮어쓰지 않도록, 서버 문서가 있을 때는 항상 서버 우선
+   - 서버 문서가 아직 없고 현재 기기에 기본값이 아닌 비밀번호가 있으면 1회 서버로 승격
+*/
+const SEBIT_TEACHER_AUTH_DOC = "teacherAuth";
+let __sebitTeacherAuthCache = null;
+let __sebitTeacherAuthLoading = null;
+
+function sebitSimpleHash(s){
+  s = String(s ?? "");
+  let h1 = 5381;
+  for (let i=0;i<s.length;i++) h1 = ((h1<<5) + h1) + s.charCodeAt(i);
+  return String(h1 >>> 0);
+}
+function sebitTeacherAuthRef(){
+  return doc(db, "sharedState", SEBIT_TEACHER_AUTH_DOC);
+}
+function sebitNormalizeTeacherAuth(data){
+  const d = (data && typeof data === "object") ? data : {};
+  const passwordHash = String(d.passwordHash || (d.password ? sebitSimpleHash(d.password) : "") || "");
+  const masterCodeHash = String(d.masterCodeHash || "");
+  return { passwordHash, masterCodeHash, updatedAt: Number(d.updatedAt || 0) };
+}
+async function loadTeacherAuthFromFirestore(){
+  if(__sebitTeacherAuthLoading) return __sebitTeacherAuthLoading;
+  __sebitTeacherAuthLoading = (async()=>{
+    try{
+      const snap = await sebitTeacherAuthRef().get();
+      const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
+      if(exists){
+        const auth = sebitNormalizeTeacherAuth(snap.data() || {});
+        __sebitTeacherAuthCache = auth;
+        if(auth.masterCodeHash) localStorage.setItem(LS.masterCodeHash, auth.masterCodeHash);
+        console.log("[SEBIT] teacher auth loaded from Firestore");
+        return auth;
+      }
+      // 서버 문서가 없을 때: 현재 기기에 기본값이 아닌 교사 비밀번호가 있으면 서버 기준으로 1회 승격
+      const localPw = String(localStorage.getItem(LS.teacherPw) || "");
+      const localMaster = String(localStorage.getItem(LS.masterCodeHash) || "");
+      if(localPw && localPw !== DEFAULT_TEACHER_PW){
+        const auth = { passwordHash: sebitSimpleHash(localPw), masterCodeHash: localMaster, updatedAt: Date.now() };
+        await sebitTeacherAuthRef().set({ key: SEBIT_TEACHER_AUTH_DOC, ...auth }, { merge:false });
+        __sebitTeacherAuthCache = auth;
+        console.log("[SEBIT] teacher auth seeded from existing non-default local password");
+        return auth;
+      }
+    }catch(err){
+      console.error("[SEBIT] teacher auth load failed", err);
+    }finally{
+      __sebitTeacherAuthLoading = null;
+    }
+    const fallback = {
+      passwordHash: sebitSimpleHash(localStorage.getItem(LS.teacherPw) || DEFAULT_TEACHER_PW),
+      masterCodeHash: String(localStorage.getItem(LS.masterCodeHash) || ""),
+      updatedAt: 0
+    };
+    __sebitTeacherAuthCache = fallback;
+    return fallback;
+  })();
+  return __sebitTeacherAuthLoading;
+}
+async function saveTeacherAuthToFirestore({ password, masterCodeHash } = {}){
+  const current = await loadTeacherAuthFromFirestore().catch(()=>__sebitTeacherAuthCache || null);
+  const next = {
+    passwordHash: password ? sebitSimpleHash(password) : String(current?.passwordHash || sebitSimpleHash(localStorage.getItem(LS.teacherPw) || DEFAULT_TEACHER_PW)),
+    masterCodeHash: (masterCodeHash !== undefined) ? String(masterCodeHash || "") : String(current?.masterCodeHash || localStorage.getItem(LS.masterCodeHash) || ""),
+    updatedAt: Date.now()
+  };
+  await sebitTeacherAuthRef().set({ key: SEBIT_TEACHER_AUTH_DOC, ...next }, { merge:false });
+  __sebitTeacherAuthCache = next;
+  if(password) localStorage.setItem(LS.teacherPw, password);
+  if(next.masterCodeHash) localStorage.setItem(LS.masterCodeHash, next.masterCodeHash);
+  console.log("[SEBIT] teacher auth saved to Firestore");
+  return next;
+}
+async function checkTeacherPassword(raw){
+  const pw = String(raw || "").trim();
+  const auth = await loadTeacherAuthFromFirestore();
+  if(auth?.passwordHash) return sebitSimpleHash(pw) === String(auth.passwordHash);
+  return pw === String(localStorage.getItem(LS.teacherPw) || DEFAULT_TEACHER_PW);
+}
+async function checkMasterCode(raw){
+  const code = String(raw || "").trim();
+  const auth = await loadTeacherAuthFromFirestore();
+  const h = String(auth?.masterCodeHash || localStorage.getItem(LS.masterCodeHash) || "");
+  if(!h) return false;
+  return sebitSimpleHash(code) === h;
+}
+
 const STUDENT_SEED = [];
 
 let session = {
@@ -2113,7 +2135,7 @@ function pushSystemLog(line) {
 
 function ensureSeed() {
   const pw = localStorage.getItem(LS.teacherPw);
-  if (!pw) { /* teacher password will be loaded from Firestore */ }
+  if (!pw) localStorage.setItem(LS.teacherPw, DEFAULT_TEACHER_PW);
 
   const students = readJSON(LS.students, null);
   if (!students || !Array.isArray(students)) {
@@ -3670,6 +3692,7 @@ function escapeHtml(str) {
 async function onTeacherLogin() {
   const input = $("#teacherPwInput");
   const err = $("#teacherLoginError");
+  const btn = $("#teacherLoginBtn");
   const raw = (input?.value || "").trim();
 
   if (!validateTeacherPw(raw)) {
@@ -3677,20 +3700,25 @@ async function onTeacherLogin() {
     return;
   }
 
-  const saved = await getTeacherPasswordForLogin();
-  if (!saved) {
-    err.textContent = "교사 비밀번호가 아직 서버에 설정되지 않았습니다. 기존 교사 PC에서 먼저 접속해 주세요.";
-    return;
+  try{
+    if(btn) btn.disabled = true;
+    err.textContent = "비밀번호 확인 중...";
+    const ok = await checkTeacherPassword(raw);
+    if (!ok) {
+      err.textContent = "비밀번호가 올바르지 않습니다.";
+      return;
+    }
+    err.textContent = "";
+    session.teacherAuthed = true;
+    runMidnightResetIfNeeded();
+    scheduleMidnightResetTick();
+    showPage("teacher-home");
+  }catch(e){
+    console.error("[SEBIT] teacher login failed", e);
+    err.textContent = "서버 비밀번호 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+  }finally{
+    if(btn) btn.disabled = false;
   }
-  if (raw !== saved) {
-    err.textContent = "비밀번호가 올바르지 않습니다.";
-    return;
-  }
-
-  session.teacherAuthed = true;
-  runMidnightResetIfNeeded();
-  scheduleMidnightResetTick();
-  showPage("teacher-home");
 }
 
 function onStudentLogin() {
@@ -4615,18 +4643,19 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
 
         const mcSet = el("div","admin-editor");
         mcSet.appendChild(el("div","admin-editor-note","마스터 코드는 분실 시 복구 불가. 오프라인 보관."));
-        const hasMC = !!localStorage.getItem(LS.masterCodeHash);
+        const hasMC = !!(localStorage.getItem(LS.masterCodeHash) || __sebitTeacherAuthCache?.masterCodeHash);
         if(!hasMC){
           const row = el("div","admin-form-grid");
           const inp = el("input","admin-input");
           inp.placeholder = "마스터 코드 설정";
           const btn = el("button","admin-btn");
           btn.type="button"; btn.textContent = "설정";
-          btn.addEventListener("click",()=>{
+          btn.addEventListener("click", async ()=>{
             const v = (inp.value||"").trim();
             if(!v) return;
-            localStorage.setItem(LS.masterCodeHash, simpleHash(v));
-            try{ scheduleTeacherAuthFirestoreSync(); }catch(_){} 
+            const h = sebitSimpleHash(v);
+            localStorage.setItem(LS.masterCodeHash, h);
+            try{ await saveTeacherAuthToFirestore({ masterCodeHash:h }); }catch(e){ console.error("[SEBIT] master code save failed", e); }
             inp.value = "";
             render();
           });
@@ -4646,17 +4675,21 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
         const save = el("button","admin-btn");
         save.type="button"; save.textContent="변경";
         const msg = el("div","admin-hint","");
-        save.addEventListener("click",()=>{
+        save.addEventListener("click", async ()=>{
           msg.textContent = "";
           const curPw = (cur.value||"").trim();
           const newPw = (nw.value||"").trim();
-          const saved = localStorage.getItem(LS.teacherPw) || DEFAULT_TEACHER_PW;
-          if(curPw !== saved) { msg.textContent = "현재 비밀번호가 다름"; return; }
+          const ok = await checkTeacherPassword(curPw);
+          if(!ok) { msg.textContent = "현재 비밀번호가 다름"; return; }
           if(!validateTeacherPw(newPw)) { msg.textContent = "영어+숫자 필요"; return; }
-          localStorage.setItem(LS.teacherPw, newPw);
-          try{ scheduleTeacherAuthFirestoreSync(); }catch(_){} 
-          cur.value=""; nw.value="";
-          msg.textContent = "변경됨";
+          try{
+            await saveTeacherAuthToFirestore({ password:newPw });
+            cur.value=""; nw.value="";
+            msg.textContent = "변경됨(모든 기기 적용)";
+          }catch(e){
+            console.error("[SEBIT] teacher password save failed", e);
+            msg.textContent = "서버 저장 실패";
+          }
         });
         g.append(cur, nw, save);
         pwBox.append(g, msg);
@@ -4671,18 +4704,23 @@ $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id=
         const rbtn = el("button","admin-btn");
         rbtn.type="button"; rbtn.textContent="재설정";
         const rmsg = el("div","admin-hint","");
-        rbtn.addEventListener("click",()=>{
+        rbtn.addEventListener("click", async ()=>{
           rmsg.textContent = "";
           const code = (mc.value||"").trim();
           const newPw = (npw.value||"").trim();
-          const h = localStorage.getItem(LS.masterCodeHash);
+          const auth = await loadTeacherAuthFromFirestore();
+          const h = String(auth?.masterCodeHash || localStorage.getItem(LS.masterCodeHash) || "");
           if(!h) { rmsg.textContent = "마스터 코드 미설정"; return; }
-          if(simpleHash(code) !== h) { rmsg.textContent = "마스터 코드 불일치"; return; }
+          if(sebitSimpleHash(code) !== h) { rmsg.textContent = "마스터 코드 불일치"; return; }
           if(!validateTeacherPw(newPw)) { rmsg.textContent = "영어+숫자 필요"; return; }
-          localStorage.setItem(LS.teacherPw, newPw);
-          try{ scheduleTeacherAuthFirestoreSync(); }catch(_){} 
-          mc.value=""; npw.value="";
-          rmsg.textContent = "재설정됨";
+          try{
+            await saveTeacherAuthToFirestore({ password:newPw, masterCodeHash:h });
+            mc.value=""; npw.value="";
+            rmsg.textContent = "재설정됨(모든 기기 적용)";
+          }catch(e){
+            console.error("[SEBIT] teacher password reset failed", e);
+            rmsg.textContent = "서버 저장 실패";
+          }
         });
         rg.append(mc, npw, rbtn);
         resetBox.append(rg, rmsg);
