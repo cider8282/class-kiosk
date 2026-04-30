@@ -11711,3 +11711,198 @@ function closeStudentShopPreviewModal(){
 
   document.addEventListener("visibilitychange", function(){ if(!document.hidden) refreshIfShopPage("visible"); });
 })();
+
+
+/* === Student: my recent penalty logs (read-only, latest 10) ===
+   - 학생 개인 화면의 벌점 내역을 penaltyLogs 통합 저장소 기준으로 표시
+   - 본인 studentId와 일치하는 기록만 최신순 10개 표시
+   - 읽기 전용 모달 제공
+*/
+(function installStudentMyPenaltyLogsFeature(){
+  if(window.__sebitStudentPenaltyLogsInstalled) return;
+  window.__sebitStudentPenaltyLogsInstalled = true;
+
+  function safeText(v){
+    try{
+      if(typeof escapeHTML === 'function') return escapeHTML(v);
+      if(typeof escapeHtml === 'function') return escapeHtml(v);
+    }catch(_){ }
+    return String(v == null ? '' : v)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  }
+
+  function fmtDate(ts){
+    const n = Number(ts || 0);
+    if(!n) return '';
+    const d = new Date(n);
+    if(Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    return `${y}-${m}-${day} ${hh}:${mm}`;
+  }
+
+  function getMyPenaltyLogs(){
+    const sid = String((window.session && session.studentId) || '').trim();
+    if(!sid) return [];
+    let logs = [];
+    try{
+      if(typeof getAllPenaltyLogs === 'function') logs = getAllPenaltyLogs();
+      else if(typeof getPenaltyStore === 'function') logs = (getPenaltyStore().logs || []);
+    }catch(_){ logs = []; }
+    return (Array.isArray(logs) ? logs : [])
+      .filter(l => String(l && (l.studentId || l.sid || '')).trim() === sid)
+      .sort((a,b)=>Number(b && b.ts || 0)-Number(a && a.ts || 0))
+      .slice(0,10);
+  }
+
+  function penaltyTitle(l){
+    return String(l && (l.ruleTitle || l.articleTitle || l.articleText || l.reason || l.ruleId || '벌점 기록') || '벌점 기록');
+  }
+
+  function penaltyLineHTML(l){
+    const canceled = String(l && l.status || '') === 'canceled';
+    const lumen = Math.abs(Number(l && (l.lumen || l.lumenMinus) || 0));
+    const xp = Math.abs(Number(l && (l.xp || l.xpMinus) || 0));
+    return `
+      <li class="student-my-penalty-log ${canceled ? 'is-canceled' : ''}">
+        <div class="student-my-penalty-title">${safeText(penaltyTitle(l))}${canceled ? ' <span class="student-my-penalty-cancel">취소됨</span>' : ''}</div>
+        <div class="student-my-penalty-meta">-${lumen} 루멘 / -${xp} XP · ${safeText(fmtDate(l && l.ts))}</div>
+      </li>
+    `;
+  }
+
+  function ensureButton(){
+    const empty = document.getElementById('studentPenaltyEmpty');
+    const list = document.getElementById('studentPenaltyList');
+    if(!empty || !list) return null;
+    let btn = document.getElementById('studentMyPenaltyLogsBtn');
+    if(!btn){
+      btn = document.createElement('button');
+      btn.id = 'studentMyPenaltyLogsBtn';
+      btn.type = 'button';
+      btn.className = 'btn soft wide';
+      btn.textContent = '내 최근 벌점 로그 보기';
+      btn.style.marginTop = '10px';
+      btn.style.marginBottom = '8px';
+      empty.insertAdjacentElement('afterend', btn);
+    }
+    return btn;
+  }
+
+  function renderMyPenaltySummary(){
+    if(String(document.body.getAttribute('data-page') || '') !== 'student-home') return;
+    const empty = document.getElementById('studentPenaltyEmpty');
+    const list = document.getElementById('studentPenaltyList');
+    if(!empty || !list) return;
+    const logs = getMyPenaltyLogs();
+    const btn = ensureButton();
+    if(btn) btn.textContent = logs.length ? `내 최근 벌점 로그 보기 (${logs.length})` : '내 최근 벌점 로그 보기';
+    list.innerHTML = '';
+    if(!logs.length){
+      empty.style.display = 'block';
+      empty.textContent = '모범 시민 진행 중';
+      return;
+    }
+    empty.style.display = 'none';
+    list.innerHTML = logs.map(penaltyLineHTML).join('');
+  }
+
+  function openMyPenaltyLogsModal(){
+    const logs = getMyPenaltyLogs();
+    let modal = document.getElementById('studentMyPenaltyLogsModal');
+    if(!modal){
+      modal = document.createElement('div');
+      modal.id = 'studentMyPenaltyLogsModal';
+      modal.className = 'sebit-modal-backdrop';
+      modal.style.display = 'none';
+      modal.innerHTML = `
+        <div class="sebit-modal" role="dialog" aria-modal="true" aria-label="내 벌점 기록" style="max-width:560px;">
+          <div class="sebit-modal-header">
+            <div class="sebit-modal-title">내 최근 벌점 기록</div>
+            <button type="button" class="btn btn-ghost" id="studentMyPenaltyLogsClose">닫기</button>
+          </div>
+          <div class="sebit-modal-body" id="studentMyPenaltyLogsBody"></div>
+          <div class="sebit-modal-footer" style="display:flex;justify-content:flex-end;">
+            <button type="button" class="btn soft" id="studentMyPenaltyLogsClose2">닫기</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener('click', (e)=>{ if(e.target === modal) closeMyPenaltyLogsModal(); });
+      modal.querySelector('#studentMyPenaltyLogsClose')?.addEventListener('click', closeMyPenaltyLogsModal);
+      modal.querySelector('#studentMyPenaltyLogsClose2')?.addEventListener('click', closeMyPenaltyLogsModal);
+    }
+    const body = modal.querySelector('#studentMyPenaltyLogsBody');
+    if(body){
+      body.innerHTML = logs.length ? `
+        <div class="muted small" style="margin-bottom:10px;">본인 기록만 최신순 10개까지 표시됩니다. 학생은 수정/삭제할 수 없습니다.</div>
+        <ul class="student-my-penalty-modal-list">${logs.map(penaltyLineHTML).join('')}</ul>
+      ` : `<div class="muted">현재 벌점 기록이 없습니다. 모범 시민 진행 중입니다.</div>`;
+    }
+    modal.style.display = 'flex';
+    document.body.classList.add('no-scroll');
+  }
+
+  function closeMyPenaltyLogsModal(){
+    const modal = document.getElementById('studentMyPenaltyLogsModal');
+    if(modal) modal.style.display = 'none';
+    document.body.classList.remove('no-scroll');
+  }
+
+  function installStyles(){
+    if(document.getElementById('studentMyPenaltyLogsStyle')) return;
+    const style = document.createElement('style');
+    style.id = 'studentMyPenaltyLogsStyle';
+    style.textContent = `
+      .student-my-penalty-log{list-style:none;padding:10px 12px;margin:8px 0;border-radius:14px;background:rgba(255,255,255,.72);border:1px solid rgba(0,0,0,.08)}
+      .student-my-penalty-title{font-weight:800;margin-bottom:4px;line-height:1.35}
+      .student-my-penalty-meta{font-size:13px;opacity:.74;line-height:1.35}
+      .student-my-penalty-cancel{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:rgba(120,120,120,.16);font-size:12px;font-weight:700}
+      .student-my-penalty-log.is-canceled{opacity:.62}
+      .student-my-penalty-modal-list{padding:0;margin:0;max-height:55vh;overflow:auto}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function boot(){
+    installStyles();
+    renderMyPenaltySummary();
+  }
+
+  document.addEventListener('click', function(e){
+    const btn = e.target && e.target.closest ? e.target.closest('#studentMyPenaltyLogsBtn') : null;
+    if(btn){
+      e.preventDefault();
+      openMyPenaltyLogsModal();
+    }
+  }, true);
+
+  // 기존 renderStudentHomeV1 실행 후 벌점 로그 목록을 실제 penaltyLogs 기준으로 덮어 그림
+  function wrapRender(){
+    if(typeof window.renderStudentHomeV1 !== 'function') return false;
+    if(window.renderStudentHomeV1.__sebitPenaltyLogsWrapped) return true;
+    const original = window.renderStudentHomeV1;
+    const wrapped = function(){
+      const ret = original.apply(this, arguments);
+      try{ setTimeout(renderMyPenaltySummary, 0); }catch(_){ }
+      return ret;
+    };
+    wrapped.__sebitPenaltyLogsWrapped = true;
+    window.renderStudentHomeV1 = wrapped;
+    return true;
+  }
+
+  window.addEventListener('load', function(){
+    let tries = 0;
+    const timer = setInterval(function(){
+      tries++;
+      wrapRender();
+      boot();
+      if(tries >= 10) clearInterval(timer);
+    }, 500);
+  });
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(renderMyPenaltySummary, 200); });
+})();
