@@ -964,7 +964,84 @@ function readThermo(){
   return normalizeThermo(readJSON(LS.thermo, defaultThermoModel()));
 }
 function writeThermo(next){
-  writeJSON(LS.thermo, next);
+  const normalized = normalizeThermo(next);
+  writeJSON(LS.thermo, normalized);
+  try { scheduleThermoFirestoreSync(normalized); } catch(_) {}
+}
+
+/* === Firestore sync: class thermometer / donations (final) ===
+   - 기준 데이터: sharedState/thermo.value
+   - 학생 기부, 교사 보상 설정/지급/초기화를 서버에 저장
+   - 교사/학생 온도계와 학생 홈 기부 한도를 실시간 갱신
+*/
+const SEBIT_THERMO_DOC = "thermo";
+let __sebitThermoLoadingFromFirestore = false;
+let __sebitThermoSyncTimer = null;
+let __sebitThermoRealtimeStarted = false;
+let __sebitUnsubThermo = null;
+
+function normalizeThermoForFirestore(state){ return normalizeThermo(state); }
+function readLocalThermoForFirestore(){
+  try{ const raw = localStorage.getItem(LS.thermo); if(raw) return normalizeThermoForFirestore(JSON.parse(raw)); }catch(_){}
+  return normalizeThermoForFirestore(defaultThermoModel());
+}
+async function syncThermoToFirestoreNow(value){
+  if(__sebitThermoLoadingFromFirestore) return;
+  try{
+    const next = normalizeThermoForFirestore(value || readLocalThermoForFirestore());
+    await doc(db, "sharedState", SEBIT_THERMO_DOC).set({ key: SEBIT_THERMO_DOC, value: next, updatedAt: Date.now() }, { merge:false });
+    console.log("[SEBIT] thermo synced to Firestore", next.now);
+  }catch(err){ console.error("[SEBIT] thermo Firestore sync failed", err); }
+}
+function scheduleThermoFirestoreSync(value){
+  if(__sebitThermoLoadingFromFirestore) return;
+  clearTimeout(__sebitThermoSyncTimer);
+  __sebitThermoSyncTimer = setTimeout(()=>syncThermoToFirestoreNow(value), 350);
+}
+async function loadThermoFromFirestore(){
+  try{
+    __sebitThermoLoadingFromFirestore = true;
+    const snap = await doc(db, "sharedState", SEBIT_THERMO_DOC).get();
+    const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
+    if(exists){
+      const data = snap.data() || {};
+      const value = normalizeThermoForFirestore(data.value || data);
+      localStorage.setItem(LS.thermo, JSON.stringify(value));
+      console.log("[SEBIT] thermo loaded from Firestore", value.now);
+    }else{
+      __sebitThermoLoadingFromFirestore = false;
+      await syncThermoToFirestoreNow(readLocalThermoForFirestore());
+      __sebitThermoLoadingFromFirestore = true;
+    }
+  }catch(err){ console.error("[SEBIT] thermo Firestore load failed", err); }
+  finally{ __sebitThermoLoadingFromFirestore = false; }
+}
+function refreshThermoViewsFromRealtime(){
+  try{
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+    if(page === "teacher-thermometer" && typeof renderThermometer === "function") renderThermometer();
+    if(page === "student-thermometer" && typeof renderStudentThermo === "function") renderStudentThermo();
+    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
+    if(typeof renderThermoDrawer === "function") renderThermoDrawer();
+  }catch(err){ console.warn("[SEBIT] thermo realtime refresh skipped", err); }
+}
+function startThermoFirestoreRealtimeSync(){
+  if(__sebitThermoRealtimeStarted) return;
+  __sebitThermoRealtimeStarted = true;
+  try{
+    __sebitUnsubThermo = onSnapshot(doc(db, "sharedState", SEBIT_THERMO_DOC), (snap)=>{
+      const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
+      if(!exists) return;
+      const data = snap.data() || {};
+      const value = normalizeThermoForFirestore(data.value || data);
+      __sebitThermoLoadingFromFirestore = true;
+      localStorage.setItem(LS.thermo, JSON.stringify(value));
+      __sebitThermoLoadingFromFirestore = false;
+      console.log("[SEBIT] thermo realtime updated", value.now);
+      refreshThermoViewsFromRealtime();
+    }, (err)=>{ console.error("[SEBIT] thermo realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] thermo realtime listener failed", err); }
 }
 
 
@@ -1188,6 +1265,9 @@ function writeJSON(key, val) {
   try {
     if (typeof LS !== "undefined" && key === LS.students) {
       scheduleStudentsFirestoreSync();
+    }
+    if (typeof LS !== "undefined" && key === LS.thermo && typeof scheduleThermoFirestoreSync === "function") {
+      scheduleThermoFirestoreSync(val);
     }
     if (typeof FS_SHOP_KEYS !== "undefined" && fsShopKeyNameFromLSKey(key)) {
       scheduleShopFirestoreSync();
@@ -2627,6 +2707,7 @@ function renderStudentHomeV1(){
   if (bankBal) bankBal.textContent = String(bankAmount);
   if (bankD) bankD.textContent = bankDday;
 
+  renderStudentDonationStatus();
   renderStudentActivity();
 }
 
@@ -2905,6 +2986,20 @@ function renderStudentThermo() {
   $("#sThermoNow").textContent = String(thermo.now || 0);
   $("#sThermoGoal").textContent = "100";
   $("#sThermoFill").style.height = Math.min(100, thermo.now || 0) + "%";
+}
+
+function renderStudentDonationStatus(){
+  if(!session.studentId) return;
+  const thermo = readThermo();
+  const today = todayKey();
+  const usedToday = (Array.isArray(thermo.donations) ? thermo.donations : []).filter(d=>d && d.studentId===session.studentId && d.date===today).reduce((a,d)=>a + (Number(d.amount)||0), 0);
+  const remain = Math.max(0, 100 - usedToday);
+  const remainEl = $("#studentDonateRemain");
+  if(remainEl) remainEl.textContent = remain>0 ? `오늘 남은 기부 한도: ${remain}루멘` : `오늘의 기부 한도(100루멘)를 모두 사용했어요.`;
+  const hintEl = $("#studentDonateHint");
+  if(hintEl){
+    hintEl.textContent = (thermo.now||0) >= 100 ? "우리 반 온도 100도 달성! · 오늘의 기부는 여기까지예요." : "기부한 루멘은 되돌릴 수 없으며, 하루 최대 100루멘까지 가능합니다.";
+  }
 }
 
 
@@ -3450,7 +3545,7 @@ function onSaveThermoGoal() {
   const v = Number($("#thermoGoalInput").value);
   const thermo = readJSON(LS.thermo, {goal:0, now:0, donations:[]});
   thermo.goal = Number.isFinite(v) && v >= 0 ? v : 0;
-  writeJSON(LS.thermo, thermo);
+  writeThermo(thermo);
   renderThermometer();
   renderTeacherHome();
 }
@@ -3824,51 +3919,38 @@ function bind() {
 
 
 // Class Donation (below bank)
-const thermo = readThermo();
-const today = todayKey();
-const usedToday = thermo.donations.filter(d=>d && d.studentId===session.studentId && d.date===today)
-  .reduce((a,d)=>a + (Number(d.amount)||0), 0);
-const remain = Math.max(0, 100 - usedToday);
+  renderStudentDonationStatus();
 
-const remainEl = $("#studentDonateRemain");
-if (remainEl) remainEl.textContent = remain>0 ? `오늘 남은 기부 한도: ${remain}루멘` : `오늘의 기부 한도(100루멘)를 모두 사용했어요.`;
-
-const hintEl = $("#studentDonateHint");
-if (hintEl && (thermo.now||0) >= 100) hintEl.textContent = "우리 반 온도 100도 달성! · 오늘의 기부는 여기까지예요.";
-
-$("#studentDonateBtn")?.addEventListener('click', ()=>{
-  const thermoNow = readThermo();
-  if ((thermoNow.now||0) >= 100) { toast('이미 100도 달성! 지금은 기부할 수 없습니다.'); return; }
-
-  const today2 = todayKey();
-  const used2 = thermoNow.donations.filter(d=>d && d.studentId===session.studentId && d.date===today2)
-    .reduce((a,d)=>a + (Number(d.amount)||0), 0);
-  const remain2 = Math.max(0, 100 - used2);
-  if (remain2 <= 0) { toast('오늘의 기부 한도(100루멘)를 모두 사용했어요.'); return; }
-
-  const raw = ($("#studentDonateAmount")?.value || "").trim();
-  const amount = Number(raw);
-  if (!Number.isFinite(amount) || amount<=0 || amount>remain2 || amount>100) { toast('기부 금액은 1~100, 그리고 오늘 남은 한도 이내로 입력하세요.'); return; }
-
-  const st = readJSON(LS.students, []);
-  const me = st.find(s=>s.id===session.studentId);
-  if (!me) { toast('학생 정보가 없습니다.'); return; }
-  const meL = Number(me.lumen||0);
-  if (meL < amount) { toast('루멘이 부족합니다.'); return; }
-
-  if (!confirm(`학급에 ${amount}루멘을 기부할까요? (되돌림 불가)`)) return;
-
-  me.lumen = meL - amount;
-  writeJSON(LS.students, st);
-
-  const entry = { ts: Date.now(), date: today2, studentId: session.studentId, amount, memo: "" };
-  const next = normalizeThermo({ ...thermoNow, donations: [...thermoNow.donations, entry] });
-  writeThermo(next);
-
-  toast('기부가 완료되었습니다.');
-  renderStudentHomeV1();
-  try{ renderTeacherHome(); }catch(_){}
-});
+  $("#studentDonateBtn")?.addEventListener('click', async ()=>{
+    const thermoNow = readThermo();
+    if ((thermoNow.now||0) >= 100) { toast('이미 100도 달성! 지금은 기부할 수 없습니다.'); return; }
+    const today2 = todayKey();
+    const used2 = (Array.isArray(thermoNow.donations) ? thermoNow.donations : []).filter(d=>d && d.studentId===session.studentId && d.date===today2).reduce((a,d)=>a + (Number(d.amount)||0), 0);
+    const remain2 = Math.max(0, 100 - used2);
+    if (remain2 <= 0) { toast('오늘의 기부 한도(100루멘)를 모두 사용했어요.'); return; }
+    const raw = ($("#studentDonateAmount")?.value || "").trim();
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount<=0 || amount>remain2 || amount>100) { toast('기부 금액은 1~100, 그리고 오늘 남은 한도 이내로 입력하세요.'); return; }
+    const st = readJSON(LS.students, []);
+    const me = st.find(s=>s.id===session.studentId);
+    if (!me) { toast('학생 정보가 없습니다.'); return; }
+    const meL = Number(me.lumen||0);
+    if (meL < amount) { toast('루멘이 부족합니다.'); return; }
+    if (!confirm(`학급에 ${amount}루멘을 기부할까요? (되돌림 불가)`)) return;
+    me.lumen = meL - amount;
+    me.updatedAt = Date.now();
+    writeJSON(LS.students, st);
+    try { syncOneStudentToFirestoreNow(me); } catch(_) {}
+    const entry = { id: "don_" + Date.now() + "_" + Math.random().toString(16).slice(2), ts: Date.now(), date: today2, studentId: session.studentId, studentName: String(me.name || ""), amount, memo: "" };
+    const next = normalizeThermo({ ...thermoNow, donations: [...(thermoNow.donations || []), entry] });
+    writeThermo(next);
+    try { await syncThermoToFirestoreNow(next); } catch(_) {}
+    const input = $("#studentDonateAmount");
+    if(input) input.value = "";
+    toast('기부가 완료되었습니다.');
+    renderStudentHomeV1();
+    try{ renderTeacherHome(); }catch(_){}
+  });
 
   // Quest View triggers (student/teacher shared)
   $("#studentQuestViewBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); openQuestViewModal(); });
@@ -9920,6 +10002,7 @@ function sebitStopRealtimeListeners(reason="idle"){
   sebitSafeUnsub(__sebitUnsubStudents, "students");
   sebitSafeUnsub(__sebitUnsubPenaltyLogs, "penaltyLogs");
   sebitSafeUnsub(__sebitUnsubConstitution, "constitution");
+  sebitSafeUnsub(__sebitUnsubThermo, "thermo");
   sebitSafeUnsub(__sebitUnsubJobState, "jobState");
   sebitSafeUnsub(__sebitUnsubShopState, "shopState");
   try{ (Array.isArray(__sebitUnsubShopDocs) ? __sebitUnsubShopDocs : []).forEach((fn, i)=>sebitSafeUnsub(fn, "shopDoc"+i)); }catch(_){ }
@@ -9928,6 +10011,7 @@ function sebitStopRealtimeListeners(reason="idle"){
   __sebitUnsubStudents = null;
   __sebitUnsubPenaltyLogs = null;
   __sebitUnsubConstitution = null;
+  __sebitUnsubThermo = null;
   __sebitUnsubJobState = null;
   __sebitUnsubShopState = null;
   __sebitUnsubShopDocs = [];
@@ -9936,6 +10020,7 @@ function sebitStopRealtimeListeners(reason="idle"){
 
   __sebitRealtimeStarted = false;
   __sebitConstitutionRealtimeStarted = false;
+  __sebitThermoRealtimeStarted = false;
   __sebitShopRealtimeStarted = false;
   __sebitJobRealtimeStarted = false;
 
@@ -9949,6 +10034,7 @@ function sebitStartRealtimeListeners(){
   try{ startShopFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] shop realtime start skipped", err); }
   try{ startJobFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] job realtime start skipped", err); }
   try{ startConstitutionFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] constitution realtime start skipped", err); }
+  try{ startThermoFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] thermo realtime start skipped", err); }
   try{ if(typeof installDirectShopListener === "function") installDirectShopListener(); }catch(_){ }
   console.log("[SEBIT GUARD] realtime started");
 }
@@ -9958,6 +10044,7 @@ function sebitRefreshVisiblePageAfterResume(){
   try{ refreshShopPagesFromRealtime(); }catch(_){ }
   try{ refreshJobPagesFromRealtime(); }catch(_){ }
   try{ refreshConstitutionViewsFromRealtime(); }catch(_){ }
+  try{ refreshThermoViewsFromRealtime(); }catch(_){ }
 }
 
 async function sebitResumeRealtimeListeners(reason="activity"){
@@ -9971,7 +10058,8 @@ async function sebitResumeRealtimeListeners(reason="activity"){
       loadPenaltyLogsFromFirestore(),
       loadShopStateFromFirestore(),
       loadJobStateFromFirestore(),
-      loadConstitutionFromFirestore()
+      loadConstitutionFromFirestore(),
+      loadThermoFromFirestore()
     ]);
     sebitRefreshVisiblePageAfterResume();
     sebitStartRealtimeListeners();
@@ -10018,7 +10106,7 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore()]).then(() => {
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore()]).then(() => {
     // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
