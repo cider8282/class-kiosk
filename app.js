@@ -25,85 +25,6 @@ function onSnapshot(ref, next, error){
   return ref.onSnapshot(next, error);
 }
 
-
-/* === Firestore sync: shared auth settings (teacher password / master code) ===
-   - 기준 데이터: sharedState/authSettings.value
-   - 교사 비밀번호와 마스터 코드 해시를 기기별 localStorage가 아니라 서버 기준으로 공유
-   - 학생 PIN은 students 컬렉션의 학생 데이터에 포함되어 이미 공유됨
-*/
-const SEBIT_AUTH_DOC = "authSettings";
-let __sebitAuthLoadingFromFirestore = false;
-let __sebitAuthSyncTimer = null;
-let __sebitAuthRealtimeStarted = false;
-let __sebitUnsubAuthSettings = null;
-
-function sebitAuthLocalValue(){
-  let teacherPw = null;
-  let masterCodeHash = null;
-  try{ teacherPw = localStorage.getItem("sebit:teacherPassword"); }catch(_){}
-  try{ masterCodeHash = localStorage.getItem("sebit:masterCodeHash"); }catch(_){}
-  return {
-    teacherPw: teacherPw || DEFAULT_TEACHER_PW,
-    masterCodeHash: masterCodeHash || "",
-    updatedAt: Date.now()
-  };
-}
-function applyAuthSettingsToLocal(value){
-  if(!value || typeof value !== "object") return;
-  try{
-    __sebitAuthLoadingFromFirestore = true;
-    if(value.teacherPw){ localStorage.setItem("sebit:teacherPassword", String(value.teacherPw)); }
-    if(value.masterCodeHash !== undefined){
-      if(value.masterCodeHash) localStorage.setItem("sebit:masterCodeHash", String(value.masterCodeHash));
-      else localStorage.removeItem("sebit:masterCodeHash");
-    }
-  }catch(err){ console.warn("[SEBIT] auth local apply skipped", err); }
-  finally{ __sebitAuthLoadingFromFirestore = false; }
-}
-async function syncAuthSettingsToFirestoreNow(){
-  if(__sebitAuthLoadingFromFirestore) return;
-  try{
-    const value = sebitAuthLocalValue();
-    await doc(db, "sharedState", SEBIT_AUTH_DOC).set({ key: SEBIT_AUTH_DOC, value, updatedAt: Date.now() }, { merge:false });
-    console.log("[SEBIT] auth settings synced to Firestore");
-  }catch(err){ console.error("[SEBIT] auth settings Firestore sync failed", err); }
-}
-function scheduleAuthSettingsFirestoreSync(){
-  if(__sebitAuthLoadingFromFirestore) return;
-  clearTimeout(__sebitAuthSyncTimer);
-  __sebitAuthSyncTimer = setTimeout(syncAuthSettingsToFirestoreNow, 350);
-}
-async function loadAuthSettingsFromFirestore(){
-  try{
-    __sebitAuthLoadingFromFirestore = true;
-    const snap = await doc(db, "sharedState", SEBIT_AUTH_DOC).get();
-    const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
-    if(exists){
-      const data = snap.data() || {};
-      applyAuthSettingsToLocal(data.value || data);
-      console.log("[SEBIT] auth settings loaded from Firestore");
-    }else{
-      __sebitAuthLoadingFromFirestore = false;
-      await syncAuthSettingsToFirestoreNow();
-      __sebitAuthLoadingFromFirestore = true;
-    }
-  }catch(err){ console.error("[SEBIT] auth settings Firestore load failed", err); }
-  finally{ __sebitAuthLoadingFromFirestore = false; }
-}
-function startAuthSettingsFirestoreRealtimeSync(){
-  if(__sebitAuthRealtimeStarted) return;
-  __sebitAuthRealtimeStarted = true;
-  try{
-    __sebitUnsubAuthSettings = onSnapshot(doc(db, "sharedState", SEBIT_AUTH_DOC), (snap)=>{
-      const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
-      if(!exists) return;
-      const data = snap.data() || {};
-      applyAuthSettingsToLocal(data.value || data);
-      console.log("[SEBIT] auth settings realtime updated");
-    }, (err)=>{ console.error("[SEBIT] auth settings realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] auth settings realtime listener failed", err); }
-}
-
 /* === Firestore sync: constitution / law + penalty values (final) ===
    - 기준 데이터: sharedState/constitution.value
    - 교사 메뉴 세빛 헌법 저장값을 서버에 올림
@@ -629,7 +550,6 @@ const FS_JOB_PREFIXES = [
 ];
 let __sebitJobLoadingFromFirestore = false;
 let __sebitJobRealtimeStarted = false;
-  __sebitActivityRealtimeStarted = false;
 let __sebitUnsubJobState = null;
 let __sebitJobSyncTimer = null;
 const __sebitJobChangedKeys = new Set();
@@ -762,7 +682,6 @@ function startJobFirestoreRealtimeSync(){
     try{
       if(this === window.localStorage){
         if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
-        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
         if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
       }
     }catch(_){ }
@@ -773,7 +692,6 @@ function startJobFirestoreRealtimeSync(){
     try{
       if(this === window.localStorage){
         if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
-        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
         if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
       }
     }catch(_){ }
@@ -1051,126 +969,6 @@ function writeThermo(next){
   try { scheduleThermoFirestoreSync(normalized); } catch(_) {}
 }
 
-/* === Firestore sync: morning self-study + reading logs (final) ===
-   - 기준 데이터: activityState/activityDaily.value, activityState/activityReadingHistory.value
-   - 학생 아침자습/독서 기록과 교사 수정 내용을 모든 기기에서 공유
-   - 기존 UI는 LS.activityDaily / LS.activityReadingHistory를 그대로 읽고, 저장될 때 서버에 자동 반영
-*/
-const FS_ACTIVITY_STATE_COLLECTION = "activityState";
-const FS_ACTIVITY_KEYS = ["activityDaily", "activityReadingHistory"];
-let __sebitActivityLoadingFromFirestore = false;
-let __sebitActivitySyncTimer = null;
-let __sebitActivityRealtimeStarted = false;
-let __sebitUnsubActivityState = null;
-  __sebitUnsubAuthSettings = null;
-
-function fsActivityLocalStorageKeyFromName(name){
-  try{
-    if(typeof LS === "undefined") return "";
-    if(name === "activityDaily") return LS.activityDaily;
-    if(name === "activityReadingHistory") return LS.activityReadingHistory;
-  }catch(_){ }
-  return "";
-}
-function fsActivityKeyNameFromLSKey(key){
-  try{
-    if(typeof LS === "undefined") return "";
-    if(key === LS.activityDaily) return "activityDaily";
-    if(key === LS.activityReadingHistory) return "activityReadingHistory";
-  }catch(_){ }
-  return "";
-}
-function fsDefaultValueForActivityKey(name){ return {}; }
-function fsReadActivityValue(name){
-  const key = fsActivityLocalStorageKeyFromName(name);
-  if(!key) return fsDefaultValueForActivityKey(name);
-  return readJSON(key, fsDefaultValueForActivityKey(name));
-}
-async function syncActivityStateToFirestoreNow(){
-  if(__sebitActivityLoadingFromFirestore) return;
-  try{
-    const batch = writeBatch(db);
-    FS_ACTIVITY_KEYS.forEach(name=>{
-      batch.set(doc(db, FS_ACTIVITY_STATE_COLLECTION, name), {
-        key:name,
-        value:fsReadActivityValue(name),
-        updatedAt:Date.now()
-      }, { merge:false });
-    });
-    await batch.commit();
-    console.log("[SEBIT] activity state synced to Firestore");
-  }catch(err){ console.error("[SEBIT] activity state Firestore sync failed", err); }
-}
-function scheduleActivityFirestoreSync(){
-  if(__sebitActivityLoadingFromFirestore) return;
-  clearTimeout(__sebitActivitySyncTimer);
-  __sebitActivitySyncTimer = setTimeout(syncActivityStateToFirestoreNow, 500);
-}
-async function loadActivityStateFromFirestore(){
-  try{
-    __sebitActivityLoadingFromFirestore = true;
-    const snap = await getDocs(collection(db, FS_ACTIVITY_STATE_COLLECTION));
-    const found = new Set();
-    snap.forEach(d=>{
-      const id = String(d.id || "");
-      if(!FS_ACTIVITY_KEYS.includes(id)) return;
-      const data = d.data() || {};
-      const key = fsActivityLocalStorageKeyFromName(id);
-      if(!key) return;
-      localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForActivityKey(id)));
-      found.add(id);
-    });
-    let shouldUpload = false;
-    FS_ACTIVITY_KEYS.forEach(name=>{
-      if(found.has(name)) return;
-      const key = fsActivityLocalStorageKeyFromName(name);
-      if(key && localStorage.getItem(key) !== null) shouldUpload = true;
-    });
-    if(shouldUpload){
-      __sebitActivityLoadingFromFirestore = false;
-      await syncActivityStateToFirestoreNow();
-      __sebitActivityLoadingFromFirestore = true;
-    }
-    console.log("[SEBIT] activity state loaded from Firestore", found.size);
-  }catch(err){ console.error("[SEBIT] activity state Firestore load failed", err); }
-  finally{ __sebitActivityLoadingFromFirestore = false; }
-}
-function refreshActivityPagesFromRealtime(){
-  try{
-    const page = String(document.body.getAttribute("data-page") || "");
-    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
-    if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
-    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
-    if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
-    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
-    if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
-  }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
-}
-function startActivityFirestoreRealtimeSync(){
-  if(__sebitActivityRealtimeStarted) return;
-  __sebitActivityRealtimeStarted = true;
-  try{
-    __sebitUnsubActivityState = onSnapshot(collection(db, FS_ACTIVITY_STATE_COLLECTION), (snap)=>{
-      __sebitActivityLoadingFromFirestore = true;
-      let changed = false;
-      snap.forEach(d=>{
-        const id = String(d.id || "");
-        if(!FS_ACTIVITY_KEYS.includes(id)) return;
-        const data = d.data() || {};
-        const key = fsActivityLocalStorageKeyFromName(id);
-        if(!key) return;
-        localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForActivityKey(id)));
-        changed = true;
-      });
-      __sebitActivityLoadingFromFirestore = false;
-      if(changed){
-        console.log("[SEBIT] activity state realtime updated");
-        refreshActivityPagesFromRealtime();
-      }
-    }, (err)=>{ console.error("[SEBIT] activity state realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] activity realtime listener failed", err); }
-}
-
 /* === Firestore sync: class thermometer / donations (final) ===
    - 기준 데이터: sharedState/thermo.value
    - 학생 기부, 교사 보상 설정/지급/초기화를 서버에 저장
@@ -1211,17 +1009,9 @@ async function loadThermoFromFirestore(){
       localStorage.setItem(LS.thermo, JSON.stringify(value));
       console.log("[SEBIT] thermo loaded from Firestore", value.now);
     }else{
-      // 서버에 온도계 문서가 없을 때만 1회 생성.
-      // 단, 새 기기에서 만든 빈 기본값(0도/기부 없음)은 서버에 올리지 않음.
-      const local = readLocalThermoForFirestore();
-      const hasLocalHistory = Array.isArray(local.donations) && local.donations.length > 0;
-      const hasLocalProgress = Number(local.now || 0) > 0;
-      const hasRewardText = local.rewardsText && Object.values(local.rewardsText).some(v => String(v || '').trim());
-      if(hasLocalHistory || hasLocalProgress || hasRewardText){
-        __sebitThermoLoadingFromFirestore = false;
-        await syncThermoToFirestoreNow(local);
-        __sebitThermoLoadingFromFirestore = true;
-      }
+      __sebitThermoLoadingFromFirestore = false;
+      await syncThermoToFirestoreNow(readLocalThermoForFirestore());
+      __sebitThermoLoadingFromFirestore = true;
     }
   }catch(err){ console.error("[SEBIT] thermo Firestore load failed", err); }
   finally{ __sebitThermoLoadingFromFirestore = false; }
@@ -2136,9 +1926,11 @@ function ensureSeed() {
 
   const thermo = readJSON(LS.thermo, null);
   if (!thermo) {
-    // 새 기기 최초 접속 시 빈 온도계(0도)를 Firestore에 덮어쓰면 안 되므로
-    // seed 단계에서는 writeJSON(=서버 동기화 트리거)을 쓰지 않고 로컬 기본값만 넣음.
-    localStorage.setItem(LS.thermo, JSON.stringify(defaultThermoModel()));
+    writeJSON(LS.thermo, {
+      goal: 0,
+      now: 0,
+      donations: []
+    });
   }
 
   const daily = readJSON(LS.activityDaily, null);
@@ -3217,7 +3009,6 @@ function getDailyActivity(){
 }
 function setDailyActivity(next){
   writeJSON(LS.activityDaily, next);
-  try { scheduleActivityFirestoreSync(); } catch(_) {}
 }
 function ensureTodayActivityRecord(studentId){
   const today = todayKey();
@@ -3679,8 +3470,7 @@ function escapeHtml(str) {
     .replaceAll("'","&#039;");
 }
 
-async function onTeacherLogin() {
-  try{ await loadAuthSettingsFromFirestore(); }catch(_){}
+function onTeacherLogin() {
   const input = $("#teacherPwInput");
   const err = $("#teacherLoginError");
   const raw = (input?.value || "").trim();
@@ -3702,8 +3492,7 @@ async function onTeacherLogin() {
   showPage("teacher-home");
 }
 
-async function onStudentLogin() {
-  try{ await loadStudentsFromFirestore(); }catch(_){}
+function onStudentLogin() {
   const id = normalizeStudentId($("#studentIdInput")?.value);
   const pin = ($("#studentPinInput")?.value || "").trim();
   const err = $("#studentLoginError");
@@ -10215,8 +10004,6 @@ function sebitStopRealtimeListeners(reason="idle"){
   sebitSafeUnsub(__sebitUnsubConstitution, "constitution");
   sebitSafeUnsub(__sebitUnsubThermo, "thermo");
   sebitSafeUnsub(__sebitUnsubJobState, "jobState");
-  sebitSafeUnsub(__sebitUnsubActivityState, "activityState");
-  sebitSafeUnsub(__sebitUnsubAuthSettings, "authSettings");
   sebitSafeUnsub(__sebitUnsubShopState, "shopState");
   try{ (Array.isArray(__sebitUnsubShopDocs) ? __sebitUnsubShopDocs : []).forEach((fn, i)=>sebitSafeUnsub(fn, "shopDoc"+i)); }catch(_){ }
   try{ sebitSafeUnsub(window.__sebitEmergencyShopDirectUnsub, "directShop"); }catch(_){ }
@@ -10226,7 +10013,6 @@ function sebitStopRealtimeListeners(reason="idle"){
   __sebitUnsubConstitution = null;
   __sebitUnsubThermo = null;
   __sebitUnsubJobState = null;
-  __sebitUnsubActivityState = null;
   __sebitUnsubShopState = null;
   __sebitUnsubShopDocs = [];
   window.__sebitEmergencyShopDirectUnsub = null;
@@ -10235,7 +10021,6 @@ function sebitStopRealtimeListeners(reason="idle"){
   __sebitRealtimeStarted = false;
   __sebitConstitutionRealtimeStarted = false;
   __sebitThermoRealtimeStarted = false;
-  __sebitAuthRealtimeStarted = false;
   __sebitShopRealtimeStarted = false;
   __sebitJobRealtimeStarted = false;
 
@@ -10250,8 +10035,6 @@ function sebitStartRealtimeListeners(){
   try{ startJobFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] job realtime start skipped", err); }
   try{ startConstitutionFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] constitution realtime start skipped", err); }
   try{ startThermoFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] thermo realtime start skipped", err); }
-  try{ startActivityFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] activity realtime start skipped", err); }
-  try{ startAuthSettingsFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] auth realtime start skipped", err); }
   try{ if(typeof installDirectShopListener === "function") installDirectShopListener(); }catch(_){ }
   console.log("[SEBIT GUARD] realtime started");
 }
@@ -10262,7 +10045,6 @@ function sebitRefreshVisiblePageAfterResume(){
   try{ refreshJobPagesFromRealtime(); }catch(_){ }
   try{ refreshConstitutionViewsFromRealtime(); }catch(_){ }
   try{ refreshThermoViewsFromRealtime(); }catch(_){ }
-  try{ refreshActivityPagesFromRealtime(); }catch(_){ }
 }
 
 async function sebitResumeRealtimeListeners(reason="activity"){
@@ -10277,9 +10059,7 @@ async function sebitResumeRealtimeListeners(reason="activity"){
       loadShopStateFromFirestore(),
       loadJobStateFromFirestore(),
       loadConstitutionFromFirestore(),
-      loadThermoFromFirestore(),
-      loadActivityStateFromFirestore(),
-      loadAuthSettingsFromFirestore()
+      loadThermoFromFirestore()
     ]);
     sebitRefreshVisiblePageAfterResume();
     sebitStartRealtimeListeners();
@@ -10326,8 +10106,8 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore(), loadAuthSettingsFromFirestore()]).then(() => {
-    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
@@ -11930,4 +11710,203 @@ function closeStudentShopPreviewModal(){
   }, true);
 
   document.addEventListener("visibilitychange", function(){ if(!document.hidden) refreshIfShopPage("visible"); });
+})();
+
+/* === Student penalty logs direct reader SUPERFIX ===
+   - 학생창 벌점 내역 버튼/목록 보강
+   - 버튼 클릭 시 Firestore penaltyLogs를 직접 1회 읽고 현재 로그인 학생 기록만 최신 10개 표시
+   - 기존 localStorage 캐시가 비어 있어도 작동
+*/
+(function installStudentPenaltyLogsSuperFix(){
+  if(window.__sebitStudentPenaltyLogsSuperFixInstalled) return;
+  window.__sebitStudentPenaltyLogsSuperFixInstalled = true;
+
+  function safeText(v){
+    try{ return (typeof escapeHTML === 'function') ? escapeHTML(v) : String(v ?? '').replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s])); }
+    catch(_){ return String(v ?? ''); }
+  }
+  function getCurrentStudent(){
+    try{
+      const id = String((window.session && session.studentId) || '').trim();
+      const me = (typeof getMe === 'function') ? getMe() : null;
+      return { id: id || String(me?.id || '').trim(), name: String(me?.name || '').trim() };
+    }catch(_){ return { id:'', name:'' }; }
+  }
+  function normalizeLogForStudentView(raw, docId){
+    const d = raw || {};
+    const ts = Number(d.ts || d.createdAt || d.updatedAt || 0) || (d.date ? new Date(String(d.date)).getTime() : Date.now());
+    return {
+      id: String(d.id || docId || ('pen_' + ts)),
+      ts,
+      date: String(d.date || ''),
+      studentId: String(d.studentId || d.sid || d.student || '').trim(),
+      studentName: String(d.studentName || d.name || '').trim(),
+      ruleTitle: String(d.ruleTitle || d.articleTitle || d.articleText || d.title || '벌점 기록'),
+      articleText: String(d.articleText || d.ruleTitle || d.articleTitle || ''),
+      lumen: Math.abs(Number(d.lumen || d.lumenMinus || 0)),
+      xp: Math.abs(Number(d.xp || d.xpMinus || 0)),
+      status: String(d.status || 'applied'),
+      canceledTs: d.canceledTs || null
+    };
+  }
+  function belongsToCurrentStudent(log, stu){
+    const sid = String(stu.id || '').trim().toUpperCase();
+    const sname = String(stu.name || '').trim();
+    const lid = String(log.studentId || '').trim().toUpperCase();
+    const lname = String(log.studentName || '').trim();
+    if(sid && lid && sid === lid) return true;
+    if(sname && lname && sname === lname) return true;
+    return false;
+  }
+  async function fetchMyPenaltyLogsFromFirestore(){
+    const stu = getCurrentStudent();
+    if(!stu.id && !stu.name) return [];
+    try{
+      if(typeof db === 'undefined' || !db || typeof db.collection !== 'function') throw new Error('Firestore not ready');
+      const snap = await db.collection('penaltyLogs').get();
+      const logs = [];
+      snap.forEach(docSnap=>{
+        const log = normalizeLogForStudentView(docSnap.data() || {}, docSnap.id);
+        if(belongsToCurrentStudent(log, stu)) logs.push(log);
+      });
+      logs.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0));
+      return logs.slice(0,10);
+    }catch(err){
+      console.error('[SEBIT] direct student penalty log fetch failed', err);
+      return getMyPenaltyLogsFromLocal();
+    }
+  }
+  function getMyPenaltyLogsFromLocal(){
+    const stu = getCurrentStudent();
+    let rawLogs = [];
+    try{
+      rawLogs = (typeof getAllPenaltyLogs === 'function') ? getAllPenaltyLogs() : [];
+    }catch(_){ rawLogs = []; }
+    return (Array.isArray(rawLogs) ? rawLogs : [])
+      .map(x=>normalizeLogForStudentView(x, x?.id))
+      .filter(l=>belongsToCurrentStudent(l, stu))
+      .sort((a,b)=>Number(b.ts||0)-Number(a.ts||0))
+      .slice(0,10);
+  }
+  function formatDate(ts, fallback){
+    try{
+      const d = new Date(Number(ts)||Date.now());
+      if(Number.isNaN(d.getTime())) return fallback || '';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }catch(_){ return fallback || ''; }
+  }
+  function ensureButton(){
+    const sec = document.querySelector('#studentPenaltyEmpty')?.closest('section') || document.querySelector('#studentPenaltyList')?.closest('section');
+    if(!sec) return null;
+    let btn = document.getElementById('studentMyPenaltyLogsBtn');
+    if(!btn){
+      btn = document.createElement('button');
+      btn.id = 'studentMyPenaltyLogsBtn';
+      btn.type = 'button';
+      btn.className = 'btn soft wide';
+      btn.style.margin = '10px 0 8px';
+      btn.textContent = '내 최근 벌점 로그 보기';
+      const list = document.getElementById('studentPenaltyList');
+      if(list && list.parentNode) list.parentNode.insertBefore(btn, list);
+      else sec.appendChild(btn);
+    }
+    return btn;
+  }
+  function renderInlinePenaltyLogs(logs){
+    const empty = document.getElementById('studentPenaltyEmpty');
+    const list = document.getElementById('studentPenaltyList');
+    const btn = ensureButton();
+    if(btn) btn.textContent = logs && logs.length ? `내 최근 벌점 로그 보기 (${logs.length})` : '내 최근 벌점 로그 보기';
+    if(!list) return;
+    if(!Array.isArray(logs) || logs.length === 0){
+      if(empty) empty.textContent = '현재 벌점 기록이 없습니다. 모범 시민 진행 중입니다.';
+      list.innerHTML = '';
+      return;
+    }
+    if(empty) empty.textContent = '';
+    list.innerHTML = logs.map(l=>{
+      const canceled = String(l.status||'') === 'canceled' || !!l.canceledTs;
+      return `<li class="student-penalty-log-item" style="padding:10px 0; border-top:1px solid rgba(0,0,0,.08); list-style:none;">
+        <div style="font-weight:800;">${safeText(l.ruleTitle || l.articleText || '벌점 기록')} ${canceled ? '<span style="color:#777; font-weight:700;">(취소됨)</span>' : ''}</div>
+        <div class="muted small">-${Number(l.lumen||0)} 루멘 / -${Number(l.xp||0)} XP · ${safeText(formatDate(l.ts, l.date))}</div>
+      </li>`;
+    }).join('');
+  }
+  function ensureModal(){
+    let modal = document.getElementById('studentMyPenaltyLogsModal');
+    if(modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'studentMyPenaltyLogsModal';
+    modal.className = 'sebit-modal-backdrop';
+    modal.style.display = 'none';
+    modal.innerHTML = `<div class="sebit-modal" role="dialog" aria-modal="true">
+      <div class="sebit-modal-header">
+        <div class="sebit-modal-title">내 최근 벌점 기록</div>
+        <button type="button" class="btn btn-ghost" data-my-penalty-close="1">닫기</button>
+      </div>
+      <div class="sebit-modal-body" id="studentMyPenaltyLogsModalBody"></div>
+      <div class="sebit-modal-footer" style="display:flex; justify-content:flex-end;">
+        <button type="button" class="btn soft" data-my-penalty-close="1">닫기</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e)=>{
+      if(e.target === modal || e.target.closest('[data-my-penalty-close]')) closeModal();
+    });
+    return modal;
+  }
+  function openModal(logs){
+    const modal = ensureModal();
+    const body = document.getElementById('studentMyPenaltyLogsModalBody');
+    if(body){
+      if(!Array.isArray(logs) || logs.length === 0){
+        body.innerHTML = `<p class="muted">현재 벌점 기록이 없습니다. 모범 시민 진행 중입니다.</p>`;
+      }else{
+        body.innerHTML = logs.map(l=>{
+          const canceled = String(l.status||'') === 'canceled' || !!l.canceledTs;
+          return `<div style="padding:12px 0; border-bottom:1px solid rgba(0,0,0,.08);">
+            <div style="font-weight:800; font-size:16px;">${safeText(l.ruleTitle || l.articleText || '벌점 기록')}</div>
+            <div class="muted small">-${Number(l.lumen||0)} 루멘 / -${Number(l.xp||0)} XP</div>
+            <div class="muted small">${safeText(formatDate(l.ts, l.date))}</div>
+            ${canceled ? '<div class="muted small" style="font-weight:800; color:#777;">취소됨</div>' : ''}
+          </div>`;
+        }).join('');
+      }
+    }
+    modal.style.display = 'flex';
+    document.body.classList.add('no-scroll');
+  }
+  function closeModal(){
+    const modal = document.getElementById('studentMyPenaltyLogsModal');
+    if(modal) modal.style.display = 'none';
+    document.body.classList.remove('no-scroll');
+  }
+  async function refreshMyPenaltyLogs(showModal){
+    const btn = ensureButton();
+    if(btn) btn.textContent = '불러오는 중...';
+    const logs = await fetchMyPenaltyLogsFromFirestore();
+    renderInlinePenaltyLogs(logs);
+    if(showModal) openModal(logs);
+  }
+
+  // 기존 학생 홈 렌더 후 버튼/요약 자동 삽입
+  const originalRender = window.renderStudentHomeV1 || (typeof renderStudentHomeV1 === 'function' ? renderStudentHomeV1 : null);
+  if(originalRender && !originalRender.__penaltySuperWrapped){
+    const wrapped = function(){
+      const ret = originalRender.apply(this, arguments);
+      setTimeout(()=>{ ensureButton(); renderInlinePenaltyLogs(getMyPenaltyLogsFromLocal()); }, 0);
+      return ret;
+    };
+    wrapped.__penaltySuperWrapped = true;
+    try{ window.renderStudentHomeV1 = wrapped; renderStudentHomeV1 = wrapped; }catch(_){ window.renderStudentHomeV1 = wrapped; }
+  }
+
+  document.addEventListener('click', (e)=>{
+    const btn = e.target && e.target.closest ? e.target.closest('#studentMyPenaltyLogsBtn') : null;
+    if(!btn) return;
+    e.preventDefault();
+    refreshMyPenaltyLogs(true);
+  });
+  document.addEventListener('DOMContentLoaded', ()=>setTimeout(()=>{ ensureButton(); renderInlinePenaltyLogs(getMyPenaltyLogsFromLocal()); }, 400));
+  setTimeout(()=>{ ensureButton(); renderInlinePenaltyLogs(getMyPenaltyLogsFromLocal()); }, 800);
 })();
