@@ -518,7 +518,10 @@ const FS_JOB_FIXED_KEYS = [
   "sebit:jobsAssign_v1",
   "sebit:jobsSession_v1",
   "sebit:jobsNonregular_v1",
-  "sebit:jobsParttime_v1"
+  "sebit:jobsParttime_v1",
+  "sebit:jobRewardPaid_v1",
+  "sebit:modelCitizenReward_v1",
+  "sebit:modelCitizenPaid_v1"
 ];
 const FS_JOB_PREFIXES = [
   "sebit_jobdone_",
@@ -7753,16 +7756,24 @@ if(j.id==="docmaster"){
     const sessionKey = ()=> String((getJobSession().startedAt || 'no_session'));
     const addRewardToStudents = (items)=>{
       // items: [{sid,lumen,xp}]
+      // 직업/모범시민 보상은 학생 점수를 올린 뒤 Firestore students 문서에도 즉시 반영해야 함.
+      // 그렇지 않으면 다른 기기의 실시간 students 값이 다시 내려오면서 보상이 사라져 보일 수 있음.
       const st = readJSON(LS.students, []);
       let changed = 0;
+      const changedStudents = [];
       items.forEach(it=>{
         const idx = st.findIndex(s=>String(s.id)===String(it.sid));
         if(idx<0) return;
         st[idx].lumen = Number(st[idx].lumen||0) + Math.max(0, Number(it.lumen||0));
         st[idx].xp = Number(st[idx].xp||0) + Math.max(0, Number(it.xp||0));
+        st[idx].updatedAt = Date.now();
+        changedStudents.push({...st[idx]});
         changed++;
       });
       writeJSON(LS.students, st);
+      changedStudents.forEach(s=>{
+        try{ syncOneStudentToFirestoreNow(s); }catch(_){}
+      });
       return changed;
     };
     const payJobRewards = ()=>{
