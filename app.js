@@ -2829,6 +2829,9 @@ function renderStudentHomeV1(){
     }
   }
 
+  // personal penalty log button (always visible, independent of model-citizen status)
+  try { ensureStudentPenaltyLogButton(); } catch(_) {}
+
   // bank info
   const bankBal = $("#studentBankBalance");
   const bankD = $("#studentBankDday");
@@ -3870,6 +3873,103 @@ function openStudentReadonlyModal(title, bodyHTML){
   modal.addEventListener('click', (e)=>{ if(e.target===modal) modal.remove(); });
   modal.querySelector('.student-view-close')?.addEventListener('click', ()=> modal.remove());
   document.body.appendChild(modal);
+}
+
+
+
+/* === Student personal penalty log viewer (read-only, session-independent) ===
+   - 모범 시민 진행/탈락 여부와 관계없이 학생 본인의 penaltyLogs 전체 중 최신 10개를 직접 조회
+   - 버튼을 누를 때 Firestore에서 1회 읽어와 캐시 상태와 무관하게 표시
+*/
+function sebitNormId(v){ return String(v || '').trim().toUpperCase(); }
+function sebitPenaltyBelongsToStudent(log, student){
+  if(!log || !student) return false;
+  const sid = sebitNormId(student.id);
+  const lid = sebitNormId(log.studentId || log.sid || log.studentID);
+  if(sid && lid && sid === lid) return true;
+  const sname = String(student.name || '').trim();
+  const lname = String(log.studentName || log.name || '').trim();
+  return !!(sname && lname && sname === lname);
+}
+function sebitFormatTs(ts){
+  const n = Number(ts || 0);
+  if(!n) return '';
+  try{
+    const d = new Date(n);
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const da = String(d.getDate()).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    return `${y}-${m}-${da} ${hh}:${mm}`;
+  }catch(_){ return ''; }
+}
+async function sebitFetchMyPenaltyLogsDirect(){
+  const me = (typeof getMe === 'function') ? getMe() : null;
+  if(!me) return [];
+  const out = [];
+  try{
+    const snap = await getDocs(collection(db, FS_COLLECTIONS.penaltyLogs));
+    snap.forEach(d=>{
+      const raw = d.data ? (d.data() || {}) : {};
+      const log = (typeof normalizePenaltyLog === 'function') ? normalizePenaltyLog({ ...raw, id: raw.id || d.id }) : { ...raw, id: raw.id || d.id };
+      if(log && sebitPenaltyBelongsToStudent(log, me)) out.push(log);
+    });
+  }catch(err){
+    console.error('[SEBIT] my penalty logs direct fetch failed', err);
+    throw err;
+  }
+  return out.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0)).slice(0,10);
+}
+function sebitRenderMyPenaltyLogsHTML(logs){
+  const arr = Array.isArray(logs) ? logs : [];
+  if(!arr.length){
+    return `<div class="muted" style="padding:10px 2px; line-height:1.6;">현재 벌점 기록이 없습니다.</div>`;
+  }
+  return `<div style="display:grid; gap:10px;">${arr.map(l=>{
+    const canceled = String(l.status || 'applied') === 'canceled';
+    const title = l.ruleTitle || l.articleTitle || l.articleText || '벌점 기록';
+    const date = l.date || sebitFormatTs(l.ts);
+    const lumen = Math.abs(Number(l.lumen || 0));
+    const xp = Math.abs(Number(l.xp || 0));
+    return `<div style="border:1px solid rgba(0,0,0,.08); background:rgba(255,255,255,.78); border-radius:16px; padding:12px 13px;">
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+        <div style="font-weight:900; color:#222;">${escapeHTML(title)}</div>
+        ${canceled ? `<span style="white-space:nowrap; border-radius:999px; padding:4px 8px; background:#eee; color:#666; font-size:12px; font-weight:900;">취소됨</span>` : ``}
+      </div>
+      <div class="muted small" style="margin-top:6px;">-${lumen} 루멘 / -${xp} XP</div>
+      <div class="muted small" style="margin-top:3px;">${escapeHTML(date)}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+async function openMyPenaltyLogsModal(){
+  openStudentReadonlyModal('내 최근 벌점 기록', `<div class="muted">불러오는 중...</div>`);
+  const modal = document.getElementById('studentReadonlyViewModal');
+  const body = modal?.querySelector('.student-view-body');
+  try{
+    const logs = await sebitFetchMyPenaltyLogsDirect();
+    if(body) body.innerHTML = sebitRenderMyPenaltyLogsHTML(logs);
+  }catch(err){
+    if(body) body.innerHTML = `<div class="muted" style="line-height:1.6;">벌점 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>`;
+  }
+}
+function ensureStudentPenaltyLogButton(){
+  const empty = document.getElementById('studentPenaltyEmpty');
+  const card = empty?.closest('.student-v1-card');
+  if(!card) return;
+  let btn = document.getElementById('studentMyPenaltyLogBtn');
+  if(!btn){
+    btn = document.createElement('button');
+    btn.id = 'studentMyPenaltyLogBtn';
+    btn.type = 'button';
+    btn.className = 'btn soft wide';
+    btn.textContent = '내 최근 벌점 기록 보기';
+    btn.style.marginTop = '10px';
+    const list = document.getElementById('studentPenaltyList');
+    if(list && list.parentElement === card) list.insertAdjacentElement('afterend', btn);
+    else card.appendChild(btn);
+  }
+  btn.onclick = openMyPenaltyLogsModal;
 }
 
 function renderStudentConstitutionReadOnlyHTML(){
