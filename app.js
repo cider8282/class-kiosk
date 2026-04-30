@@ -2917,6 +2917,9 @@ function renderStudentHomeV1(){
     }
   }
 
+  // personal penalty log button (always visible; independent from model citizen status)
+  try { ensureStudentPenaltyLogButton(); } catch(_) {}
+
   // bank info
   const bankBal = $("#studentBankBalance");
   const bankD = $("#studentBankDday");
@@ -3658,7 +3661,9 @@ function openTodayReadingDetail(){
       const btn = document.createElement("button");
       btn.className = "chip";
       btn.textContent = "자세히 보기";
-      btn.addEventListener("click", ()=>{
+      btn.addEventListener("click", (e)=>{
+        e.preventDefault();
+        e.stopPropagation();
         const el = $(`#trd_${s.id}`);
         if (!el) return;
         const isOpen = el.style.display !== "none";
@@ -3674,10 +3679,12 @@ function openTodayReadingDetail(){
   }
 
   modal.classList.remove("hidden");
+  try{ document.body.classList.add("no-scroll"); }catch(_){}
 }
 
 function closeTodayReadingDetail(){
   $("#todayReadingDetailModal")?.classList.add("hidden");
+  try{ document.body.classList.remove("no-scroll"); }catch(_){}
 }
 
 function escapeHtml(str) {
@@ -3689,6 +3696,126 @@ function escapeHtml(str) {
     .replaceAll("'","&#039;");
 }
 
+/* === Student personal penalty log viewer (read-only, latest 10) === */
+function ensureStudentPenaltyLogButton(){
+  const list = document.getElementById("studentPenaltyList");
+  const empty = document.getElementById("studentPenaltyEmpty");
+  if(!list && !empty) return;
+  const parent = (list && list.parentElement) || (empty && empty.parentElement);
+  if(!parent) return;
+  if(document.getElementById("viewMyPenaltyLogsBtn")) return;
+  const btn = document.createElement("button");
+  btn.id = "viewMyPenaltyLogsBtn";
+  btn.type = "button";
+  btn.className = "btn soft wide";
+  btn.style.margin = "10px 0";
+  btn.textContent = "내 최근 벌점 기록 보기";
+  if(list) parent.insertBefore(btn, list.nextSibling);
+  else parent.appendChild(btn);
+}
+
+function formatPenaltyLogDate(ts){
+  const n = Number(ts || 0);
+  if(!n) return "날짜 없음";
+  const d = new Date(n);
+  if(Number.isNaN(d.getTime())) return "날짜 없음";
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  const hh = String(d.getHours()).padStart(2,"0");
+  const mm = String(d.getMinutes()).padStart(2,"0");
+  return `${y}-${m}-${day} ${hh}:${mm}`;
+}
+
+async function fetchMyPenaltyLogsLatest10(){
+  const me = (typeof getMe === "function") ? getMe() : null;
+  const sid = String(session?.studentId || me?.id || "").trim();
+  const sname = String(me?.name || "").trim();
+  if(!sid) return [];
+  const arr = [];
+  try{
+    const snap = await collection(db, FS_COLLECTIONS.penaltyLogs).get();
+    snap.forEach(d=>{
+      const data = d.data() || {};
+      const log = (typeof normalizePenaltyLog === "function") ? normalizePenaltyLog({ ...data, id: data.id || d.id }) : { ...data, id:data.id || d.id };
+      if(!log) return;
+      const logSid = String(log.studentId || data.sid || "").trim();
+      const logName = String(data.studentName || data.name || "").trim();
+      if(logSid === sid || (sname && logName === sname)) arr.push(log);
+    });
+  }catch(err){
+    console.warn("[SEBIT] direct penalty log read failed; fallback to local cache", err);
+    try{
+      const local = (typeof getAllPenaltyLogs === "function") ? getAllPenaltyLogs() : [];
+      local.forEach(l=>{ if(String(l.studentId||"").trim() === sid) arr.push(l); });
+    }catch(_){}
+  }
+  return arr.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0)).slice(0,10);
+}
+
+function renderMyPenaltyLogsHTML(logs){
+  if(!Array.isArray(logs) || logs.length === 0){
+    return `<div class="muted" style="padding:14px;">최근 벌점 기록이 없습니다.</div>`;
+  }
+  return `<div class="history-list">${logs.map(l=>{
+    const title = escapeHTML(String(l.ruleTitle || l.articleTitle || l.articleText || "벌점 기록"));
+    const date = escapeHTML(formatPenaltyLogDate(l.ts));
+    const lumen = Math.abs(Number(l.lumen || 0));
+    const xp = Math.abs(Number(l.xp || 0));
+    const canceled = String(l.status || "") === "canceled";
+    return `<div class="history-row" style="align-items:flex-start;"><div class="history-left"><div><b>${title}</b> ${canceled ? `<span class="muted small">(취소됨)</span>` : ``}</div><div class="muted small">${date}</div><div class="muted small">-${lumen} 루멘 / -${xp} XP</div></div></div>`;
+  }).join("")}</div>`;
+}
+
+function openMyPenaltyLogsModal(logs){
+  let modal = document.getElementById("myPenaltyLogsModal");
+  if(!modal){
+    modal = document.createElement("div");
+    modal.id = "myPenaltyLogsModal";
+    modal.className = "modal hidden";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.innerHTML = `<div class="modal-card wide"><header class="modal-top"><div class="modal-title">내 최근 벌점 기록</div><button class="chip" id="closeMyPenaltyLogsBtn" type="button">닫기</button></header><div class="activity-history" id="myPenaltyLogsBody"></div></div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", (e)=>{ if(e.target === modal) closeMyPenaltyLogsModal(); else e.stopPropagation(); });
+    modal.querySelector("#closeMyPenaltyLogsBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); closeMyPenaltyLogsModal(); });
+  }
+  const body = modal.querySelector("#myPenaltyLogsBody");
+  if(body) body.innerHTML = renderMyPenaltyLogsHTML(logs);
+  modal.classList.remove("hidden");
+  try{ document.body.classList.add("no-scroll"); }catch(_){}
+}
+
+function closeMyPenaltyLogsModal(){
+  document.getElementById("myPenaltyLogsModal")?.classList.add("hidden");
+  try{ document.body.classList.remove("no-scroll"); }catch(_){}
+}
+
+async function handleViewMyPenaltyLogsClick(){
+  const btn = document.getElementById("viewMyPenaltyLogsBtn");
+  try{
+    if(btn){ btn.disabled = true; btn.textContent = "불러오는 중..."; }
+    const logs = await fetchMyPenaltyLogsLatest10();
+    openMyPenaltyLogsModal(logs);
+  }catch(err){
+    console.error("[SEBIT] my penalty logs open failed", err);
+    if(typeof toast === "function") toast("벌점 기록을 불러오지 못했습니다.");
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = "내 최근 벌점 기록 보기"; }
+  }
+}
+
+(function bindStudentPenaltyLogAlwaysButton(){
+  if(window.__sebitPenaltyLogButtonBound) return;
+  window.__sebitPenaltyLogButtonBound = true;
+  document.addEventListener("click", (e)=>{
+    const btn = e.target && e.target.closest ? e.target.closest("#viewMyPenaltyLogsBtn") : null;
+    if(!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    handleViewMyPenaltyLogsClick();
+  }, true);
+})();
 async function onTeacherLogin() {
   const input = $("#teacherPwInput");
   const err = $("#teacherLoginError");
@@ -4265,12 +4392,23 @@ function bind() {
   // Bank handlers are wired in wireStudentBankButtons().
 
   // Activity history modal
-  $("#closeActivityHistoryBtn")?.addEventListener("click", closeActivityHistory);
-  $("#activityHistoryModal")?.addEventListener("click", (e)=>{ if (e.target.id==="activityHistoryModal") closeActivityHistory(); });
-// Today reading detail modal (teacher home)
-$("#openTodayReadingDetailBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openTodayReadingDetail(); });
-$("#closeTodayReadingDetailBtn")?.addEventListener("click", closeTodayReadingDetail);
-$("#todayReadingDetailModal")?.addEventListener("click", (e)=>{ if (e.target.id==="todayReadingDetailModal") closeTodayReadingDetail(); });
+  $("#closeActivityHistoryBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); closeActivityHistory(); });
+  $("#activityHistoryModal")?.addEventListener("click", (e)=>{
+    if(e.target && e.target.id==="activityHistoryModal") closeActivityHistory();
+    else e.stopPropagation();
+  });
+
+  // Today reading detail modal (teacher home)
+  $("#openTodayReadingDetailBtn")?.addEventListener("click", (e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    openTodayReadingDetail();
+  });
+  $("#closeTodayReadingDetailBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); closeTodayReadingDetail(); });
+  $("#todayReadingDetailModal")?.addEventListener("click", (e)=>{
+    if(e.target && e.target.id==="todayReadingDetailModal") closeTodayReadingDetail();
+    else e.stopPropagation();
+  });
 
 
 
