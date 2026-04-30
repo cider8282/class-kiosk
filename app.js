@@ -550,6 +550,7 @@ const FS_JOB_PREFIXES = [
 ];
 let __sebitJobLoadingFromFirestore = false;
 let __sebitJobRealtimeStarted = false;
+  __sebitActivityRealtimeStarted = false;
 let __sebitUnsubJobState = null;
 let __sebitJobSyncTimer = null;
 const __sebitJobChangedKeys = new Set();
@@ -682,6 +683,7 @@ function startJobFirestoreRealtimeSync(){
     try{
       if(this === window.localStorage){
         if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
+        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
         if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
       }
     }catch(_){ }
@@ -692,6 +694,7 @@ function startJobFirestoreRealtimeSync(){
     try{
       if(this === window.localStorage){
         if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
+        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
         if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
       }
     }catch(_){ }
@@ -969,6 +972,125 @@ function writeThermo(next){
   try { scheduleThermoFirestoreSync(normalized); } catch(_) {}
 }
 
+/* === Firestore sync: morning self-study + reading logs (final) ===
+   - 기준 데이터: activityState/activityDaily.value, activityState/activityReadingHistory.value
+   - 학생 아침자습/독서 기록과 교사 수정 내용을 모든 기기에서 공유
+   - 기존 UI는 LS.activityDaily / LS.activityReadingHistory를 그대로 읽고, 저장될 때 서버에 자동 반영
+*/
+const FS_ACTIVITY_STATE_COLLECTION = "activityState";
+const FS_ACTIVITY_KEYS = ["activityDaily", "activityReadingHistory"];
+let __sebitActivityLoadingFromFirestore = false;
+let __sebitActivitySyncTimer = null;
+let __sebitActivityRealtimeStarted = false;
+let __sebitUnsubActivityState = null;
+
+function fsActivityLocalStorageKeyFromName(name){
+  try{
+    if(typeof LS === "undefined") return "";
+    if(name === "activityDaily") return LS.activityDaily;
+    if(name === "activityReadingHistory") return LS.activityReadingHistory;
+  }catch(_){ }
+  return "";
+}
+function fsActivityKeyNameFromLSKey(key){
+  try{
+    if(typeof LS === "undefined") return "";
+    if(key === LS.activityDaily) return "activityDaily";
+    if(key === LS.activityReadingHistory) return "activityReadingHistory";
+  }catch(_){ }
+  return "";
+}
+function fsDefaultValueForActivityKey(name){ return {}; }
+function fsReadActivityValue(name){
+  const key = fsActivityLocalStorageKeyFromName(name);
+  if(!key) return fsDefaultValueForActivityKey(name);
+  return readJSON(key, fsDefaultValueForActivityKey(name));
+}
+async function syncActivityStateToFirestoreNow(){
+  if(__sebitActivityLoadingFromFirestore) return;
+  try{
+    const batch = writeBatch(db);
+    FS_ACTIVITY_KEYS.forEach(name=>{
+      batch.set(doc(db, FS_ACTIVITY_STATE_COLLECTION, name), {
+        key:name,
+        value:fsReadActivityValue(name),
+        updatedAt:Date.now()
+      }, { merge:false });
+    });
+    await batch.commit();
+    console.log("[SEBIT] activity state synced to Firestore");
+  }catch(err){ console.error("[SEBIT] activity state Firestore sync failed", err); }
+}
+function scheduleActivityFirestoreSync(){
+  if(__sebitActivityLoadingFromFirestore) return;
+  clearTimeout(__sebitActivitySyncTimer);
+  __sebitActivitySyncTimer = setTimeout(syncActivityStateToFirestoreNow, 500);
+}
+async function loadActivityStateFromFirestore(){
+  try{
+    __sebitActivityLoadingFromFirestore = true;
+    const snap = await getDocs(collection(db, FS_ACTIVITY_STATE_COLLECTION));
+    const found = new Set();
+    snap.forEach(d=>{
+      const id = String(d.id || "");
+      if(!FS_ACTIVITY_KEYS.includes(id)) return;
+      const data = d.data() || {};
+      const key = fsActivityLocalStorageKeyFromName(id);
+      if(!key) return;
+      localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForActivityKey(id)));
+      found.add(id);
+    });
+    let shouldUpload = false;
+    FS_ACTIVITY_KEYS.forEach(name=>{
+      if(found.has(name)) return;
+      const key = fsActivityLocalStorageKeyFromName(name);
+      if(key && localStorage.getItem(key) !== null) shouldUpload = true;
+    });
+    if(shouldUpload){
+      __sebitActivityLoadingFromFirestore = false;
+      await syncActivityStateToFirestoreNow();
+      __sebitActivityLoadingFromFirestore = true;
+    }
+    console.log("[SEBIT] activity state loaded from Firestore", found.size);
+  }catch(err){ console.error("[SEBIT] activity state Firestore load failed", err); }
+  finally{ __sebitActivityLoadingFromFirestore = false; }
+}
+function refreshActivityPagesFromRealtime(){
+  try{
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+    if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
+    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+    if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
+    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
+    if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
+  }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
+}
+function startActivityFirestoreRealtimeSync(){
+  if(__sebitActivityRealtimeStarted) return;
+  __sebitActivityRealtimeStarted = true;
+  try{
+    __sebitUnsubActivityState = onSnapshot(collection(db, FS_ACTIVITY_STATE_COLLECTION), (snap)=>{
+      __sebitActivityLoadingFromFirestore = true;
+      let changed = false;
+      snap.forEach(d=>{
+        const id = String(d.id || "");
+        if(!FS_ACTIVITY_KEYS.includes(id)) return;
+        const data = d.data() || {};
+        const key = fsActivityLocalStorageKeyFromName(id);
+        if(!key) return;
+        localStorage.setItem(key, JSON.stringify(data.value !== undefined ? data.value : fsDefaultValueForActivityKey(id)));
+        changed = true;
+      });
+      __sebitActivityLoadingFromFirestore = false;
+      if(changed){
+        console.log("[SEBIT] activity state realtime updated");
+        refreshActivityPagesFromRealtime();
+      }
+    }, (err)=>{ console.error("[SEBIT] activity state realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] activity realtime listener failed", err); }
+}
+
 /* === Firestore sync: class thermometer / donations (final) ===
    - 기준 데이터: sharedState/thermo.value
    - 학생 기부, 교사 보상 설정/지급/초기화를 서버에 저장
@@ -1009,9 +1131,17 @@ async function loadThermoFromFirestore(){
       localStorage.setItem(LS.thermo, JSON.stringify(value));
       console.log("[SEBIT] thermo loaded from Firestore", value.now);
     }else{
-      __sebitThermoLoadingFromFirestore = false;
-      await syncThermoToFirestoreNow(readLocalThermoForFirestore());
-      __sebitThermoLoadingFromFirestore = true;
+      // 서버에 온도계 문서가 없을 때만 1회 생성.
+      // 단, 새 기기에서 만든 빈 기본값(0도/기부 없음)은 서버에 올리지 않음.
+      const local = readLocalThermoForFirestore();
+      const hasLocalHistory = Array.isArray(local.donations) && local.donations.length > 0;
+      const hasLocalProgress = Number(local.now || 0) > 0;
+      const hasRewardText = local.rewardsText && Object.values(local.rewardsText).some(v => String(v || '').trim());
+      if(hasLocalHistory || hasLocalProgress || hasRewardText){
+        __sebitThermoLoadingFromFirestore = false;
+        await syncThermoToFirestoreNow(local);
+        __sebitThermoLoadingFromFirestore = true;
+      }
     }
   }catch(err){ console.error("[SEBIT] thermo Firestore load failed", err); }
   finally{ __sebitThermoLoadingFromFirestore = false; }
@@ -1926,11 +2056,9 @@ function ensureSeed() {
 
   const thermo = readJSON(LS.thermo, null);
   if (!thermo) {
-    writeJSON(LS.thermo, {
-      goal: 0,
-      now: 0,
-      donations: []
-    });
+    // 새 기기 최초 접속 시 빈 온도계(0도)를 Firestore에 덮어쓰면 안 되므로
+    // seed 단계에서는 writeJSON(=서버 동기화 트리거)을 쓰지 않고 로컬 기본값만 넣음.
+    localStorage.setItem(LS.thermo, JSON.stringify(defaultThermoModel()));
   }
 
   const daily = readJSON(LS.activityDaily, null);
@@ -3009,6 +3137,7 @@ function getDailyActivity(){
 }
 function setDailyActivity(next){
   writeJSON(LS.activityDaily, next);
+  try { scheduleActivityFirestoreSync(); } catch(_) {}
 }
 function ensureTodayActivityRecord(studentId){
   const today = todayKey();
@@ -10004,6 +10133,7 @@ function sebitStopRealtimeListeners(reason="idle"){
   sebitSafeUnsub(__sebitUnsubConstitution, "constitution");
   sebitSafeUnsub(__sebitUnsubThermo, "thermo");
   sebitSafeUnsub(__sebitUnsubJobState, "jobState");
+  sebitSafeUnsub(__sebitUnsubActivityState, "activityState");
   sebitSafeUnsub(__sebitUnsubShopState, "shopState");
   try{ (Array.isArray(__sebitUnsubShopDocs) ? __sebitUnsubShopDocs : []).forEach((fn, i)=>sebitSafeUnsub(fn, "shopDoc"+i)); }catch(_){ }
   try{ sebitSafeUnsub(window.__sebitEmergencyShopDirectUnsub, "directShop"); }catch(_){ }
@@ -10013,6 +10143,7 @@ function sebitStopRealtimeListeners(reason="idle"){
   __sebitUnsubConstitution = null;
   __sebitUnsubThermo = null;
   __sebitUnsubJobState = null;
+  __sebitUnsubActivityState = null;
   __sebitUnsubShopState = null;
   __sebitUnsubShopDocs = [];
   window.__sebitEmergencyShopDirectUnsub = null;
@@ -10035,6 +10166,7 @@ function sebitStartRealtimeListeners(){
   try{ startJobFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] job realtime start skipped", err); }
   try{ startConstitutionFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] constitution realtime start skipped", err); }
   try{ startThermoFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] thermo realtime start skipped", err); }
+  try{ startActivityFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] activity realtime start skipped", err); }
   try{ if(typeof installDirectShopListener === "function") installDirectShopListener(); }catch(_){ }
   console.log("[SEBIT GUARD] realtime started");
 }
@@ -10045,6 +10177,7 @@ function sebitRefreshVisiblePageAfterResume(){
   try{ refreshJobPagesFromRealtime(); }catch(_){ }
   try{ refreshConstitutionViewsFromRealtime(); }catch(_){ }
   try{ refreshThermoViewsFromRealtime(); }catch(_){ }
+  try{ refreshActivityPagesFromRealtime(); }catch(_){ }
 }
 
 async function sebitResumeRealtimeListeners(reason="activity"){
@@ -10059,7 +10192,8 @@ async function sebitResumeRealtimeListeners(reason="activity"){
       loadShopStateFromFirestore(),
       loadJobStateFromFirestore(),
       loadConstitutionFromFirestore(),
-      loadThermoFromFirestore()
+      loadThermoFromFirestore(),
+      loadActivityStateFromFirestore()
     ]);
     sebitRefreshVisiblePageAfterResume();
     sebitStartRealtimeListeners();
@@ -10106,8 +10240,8 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore()]).then(() => {
-    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
@@ -11710,261 +11844,4 @@ function closeStudentShopPreviewModal(){
   }, true);
 
   document.addEventListener("visibilitychange", function(){ if(!document.hidden) refreshIfShopPage("visible"); });
-})();
-
-/* === Student: My latest penalty logs (direct Firestore read, read-only) ===
-   - 학생 홈 벌점 내역 영역에 버튼을 추가함
-   - 버튼을 누를 때마다 Firestore penaltyLogs를 직접 1회 읽어서 본인 최신 10개만 표시함
-   - 비용 보호 장치로 평상시 실시간 감시는 늘리지 않음
-*/
-(function installStudentMyPenaltyLogsDirectFeature(){
-  if(window.__sebitStudentPenaltyLogsDirectInstalled) return;
-  window.__sebitStudentPenaltyLogsDirectInstalled = true;
-
-  function safeText(v){
-    try{
-      if(typeof escapeHTML === 'function') return escapeHTML(v);
-      if(typeof escapeHtml === 'function') return escapeHtml(v);
-    }catch(_){ }
-    return String(v == null ? '' : v)
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
-  }
-
-  function fmtDate(ts){
-    const n = Number(ts || 0);
-    if(!n) return '';
-    const d = new Date(n);
-    if(Number.isNaN(d.getTime())) return '';
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    const day = String(d.getDate()).padStart(2,'0');
-    const hh = String(d.getHours()).padStart(2,'0');
-    const mm = String(d.getMinutes()).padStart(2,'0');
-    return `${y}-${m}-${day} ${hh}:${mm}`;
-  }
-
-  function getCurrentStudentId(){
-    return String((window.session && session.studentId) || '').trim();
-  }
-
-  function normalizePenaltyForStudentView(raw, docId){
-    const l = raw || {};
-    const ts = Number(l.ts || l.createdAt || l.updatedAt || 0);
-    return {
-      id: String(l.id || docId || ''),
-      studentId: String(l.studentId || l.sid || '').trim(),
-      ruleTitle: String(l.ruleTitle || l.articleTitle || l.articleText || l.reason || l.ruleId || '벌점 기록'),
-      articleText: String(l.articleText || ''),
-      lumen: Math.abs(Number(l.lumen || l.lumenMinus || 0)),
-      xp: Math.abs(Number(l.xp || l.xpMinus || 0)),
-      status: String(l.status || 'applied'),
-      ts
-    };
-  }
-
-  async function fetchMyPenaltyLogsDirect(){
-    const sid = getCurrentStudentId();
-    if(!sid) return [];
-    try{
-      let snap;
-      if(typeof getDocs === 'function' && typeof collection === 'function' && typeof db !== 'undefined'){
-        snap = await getDocs(collection(db, 'penaltyLogs'));
-      }else if(typeof db !== 'undefined' && db.collection){
-        snap = await db.collection('penaltyLogs').get();
-      }else{
-        return getMyPenaltyLogsFromLocal();
-      }
-      const rows = [];
-      snap.forEach(function(d){
-        const data = (typeof d.data === 'function') ? (d.data() || {}) : (d.data || {});
-        const id = d.id || data.id || '';
-        const n = normalizePenaltyForStudentView(data, id);
-        if(String(n.studentId) === sid) rows.push(n);
-      });
-      rows.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0));
-      const top = rows.slice(0,10);
-      // 로컬 캐시도 함께 갱신해서 학생 홈 요약이 바로 따라오게 함
-      try{
-        if(typeof LS_KEYS !== 'undefined' && LS_KEYS.penaltyStore){
-          const allRows = [];
-          snap.forEach(function(d){
-            const data = (typeof d.data === 'function') ? (d.data() || {}) : (d.data || {});
-            allRows.push(normalizePenaltyForStudentView(data, d.id || data.id || ''));
-          });
-          allRows.sort((a,b)=>Number(b.ts||0)-Number(a.ts||0));
-          localStorage.setItem(LS_KEYS.penaltyStore, JSON.stringify({version:2, logs:allRows}));
-        }
-      }catch(_){ }
-      return top;
-    }catch(err){
-      console.warn('[SEBIT] direct my penalty log read failed; using local cache', err);
-      return getMyPenaltyLogsFromLocal();
-    }
-  }
-
-  function getMyPenaltyLogsFromLocal(){
-    const sid = getCurrentStudentId();
-    if(!sid) return [];
-    let logs = [];
-    try{
-      if(typeof getAllPenaltyLogs === 'function') logs = getAllPenaltyLogs();
-      else if(typeof getPenaltyStore === 'function') logs = (getPenaltyStore().logs || []);
-    }catch(_){ logs = []; }
-    return (Array.isArray(logs) ? logs : [])
-      .map((l)=>normalizePenaltyForStudentView(l, l && l.id))
-      .filter(l => String(l.studentId) === sid)
-      .sort((a,b)=>Number(b.ts||0)-Number(a.ts||0))
-      .slice(0,10);
-  }
-
-  function penaltyLineHTML(l){
-    const canceled = String(l && l.status || '') === 'canceled';
-    const lumen = Math.abs(Number(l && l.lumen || 0));
-    const xp = Math.abs(Number(l && l.xp || 0));
-    return `
-      <li class="student-my-penalty-log ${canceled ? 'is-canceled' : ''}">
-        <div class="student-my-penalty-title">${safeText(l && l.ruleTitle || '벌점 기록')}${canceled ? ' <span class="student-my-penalty-cancel">취소됨</span>' : ''}</div>
-        <div class="student-my-penalty-meta">-${lumen} 루멘 / -${xp} XP · ${safeText(fmtDate(l && l.ts))}</div>
-      </li>
-    `;
-  }
-
-  function ensureButton(){
-    const empty = document.getElementById('studentPenaltyEmpty');
-    const list = document.getElementById('studentPenaltyList');
-    if(!empty || !list) return null;
-    let btn = document.getElementById('studentMyPenaltyLogsBtn');
-    if(!btn){
-      btn = document.createElement('button');
-      btn.id = 'studentMyPenaltyLogsBtn';
-      btn.type = 'button';
-      btn.className = 'btn soft wide';
-      btn.textContent = '내 최근 벌점 로그 보기';
-      btn.style.marginTop = '10px';
-      btn.style.marginBottom = '8px';
-      empty.insertAdjacentElement('afterend', btn);
-    }
-    return btn;
-  }
-
-  function renderMyPenaltySummary(logs){
-    if(String(document.body.getAttribute('data-page') || '') !== 'student-home') return;
-    const empty = document.getElementById('studentPenaltyEmpty');
-    const list = document.getElementById('studentPenaltyList');
-    if(!empty || !list) return;
-    const finalLogs = Array.isArray(logs) ? logs : getMyPenaltyLogsFromLocal();
-    const btn = ensureButton();
-    if(btn) btn.textContent = finalLogs.length ? `내 최근 벌점 로그 보기 (${finalLogs.length})` : '내 최근 벌점 로그 보기';
-    list.innerHTML = '';
-    if(!finalLogs.length){
-      empty.style.display = 'block';
-      empty.textContent = '모범 시민 진행 중';
-      return;
-    }
-    empty.style.display = 'none';
-    list.innerHTML = finalLogs.map(penaltyLineHTML).join('');
-  }
-
-  function ensureModal(){
-    let modal = document.getElementById('studentMyPenaltyLogsModal');
-    if(modal) return modal;
-    modal = document.createElement('div');
-    modal.id = 'studentMyPenaltyLogsModal';
-    modal.className = 'sebit-modal-backdrop';
-    modal.style.display = 'none';
-    modal.innerHTML = `
-      <div class="sebit-modal" role="dialog" aria-modal="true" aria-label="내 벌점 기록" style="max-width:560px;">
-        <div class="sebit-modal-header">
-          <div class="sebit-modal-title">내 최근 벌점 기록</div>
-          <button type="button" class="btn btn-ghost" id="studentMyPenaltyLogsClose">닫기</button>
-        </div>
-        <div class="sebit-modal-body" id="studentMyPenaltyLogsBody"></div>
-        <div class="sebit-modal-footer" style="display:flex;justify-content:flex-end;">
-          <button type="button" class="btn soft" id="studentMyPenaltyLogsClose2">닫기</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-    modal.addEventListener('click', (e)=>{ if(e.target === modal) closeMyPenaltyLogsModal(); });
-    modal.querySelector('#studentMyPenaltyLogsClose')?.addEventListener('click', closeMyPenaltyLogsModal);
-    modal.querySelector('#studentMyPenaltyLogsClose2')?.addEventListener('click', closeMyPenaltyLogsModal);
-    return modal;
-  }
-
-  async function openMyPenaltyLogsModal(){
-    const modal = ensureModal();
-    const body = modal.querySelector('#studentMyPenaltyLogsBody');
-    if(body) body.innerHTML = `<div class="muted">벌점 기록을 불러오는 중입니다...</div>`;
-    modal.style.display = 'flex';
-    document.body.classList.add('no-scroll');
-
-    const logs = await fetchMyPenaltyLogsDirect();
-    renderMyPenaltySummary(logs);
-    if(body){
-      body.innerHTML = logs.length ? `
-        <div class="muted small" style="margin-bottom:10px;">Firestore에서 바로 읽어온 본인 기록만 최신순 10개까지 표시됩니다. 학생은 수정/삭제할 수 없습니다.</div>
-        <ul class="student-my-penalty-modal-list">${logs.map(penaltyLineHTML).join('')}</ul>
-      ` : `<div class="muted">현재 벌점 기록이 없습니다. 모범 시민 진행 중입니다.</div>`;
-    }
-  }
-
-  function closeMyPenaltyLogsModal(){
-    const modal = document.getElementById('studentMyPenaltyLogsModal');
-    if(modal) modal.style.display = 'none';
-    document.body.classList.remove('no-scroll');
-  }
-
-  function installStyles(){
-    if(document.getElementById('studentMyPenaltyLogsStyle')) return;
-    const style = document.createElement('style');
-    style.id = 'studentMyPenaltyLogsStyle';
-    style.textContent = `
-      .student-my-penalty-log{list-style:none;padding:10px 12px;margin:8px 0;border-radius:14px;background:rgba(255,255,255,.72);border:1px solid rgba(0,0,0,.08)}
-      .student-my-penalty-title{font-weight:800;margin-bottom:4px;line-height:1.35}
-      .student-my-penalty-meta{font-size:13px;opacity:.74;line-height:1.35}
-      .student-my-penalty-cancel{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;background:rgba(120,120,120,.16);font-size:12px;font-weight:700}
-      .student-my-penalty-log.is-canceled{opacity:.62}
-      .student-my-penalty-modal-list{padding:0;margin:0;max-height:55vh;overflow:auto}
-    `;
-    document.head.appendChild(style);
-  }
-
-  function boot(){
-    installStyles();
-    ensureButton();
-    renderMyPenaltySummary();
-  }
-
-  document.addEventListener('click', function(e){
-    const btn = e.target && e.target.closest ? e.target.closest('#studentMyPenaltyLogsBtn') : null;
-    if(btn){
-      e.preventDefault();
-      openMyPenaltyLogsModal();
-    }
-  }, true);
-
-  function wrapRender(){
-    if(typeof window.renderStudentHomeV1 !== 'function') return false;
-    if(window.renderStudentHomeV1.__sebitPenaltyLogsDirectWrapped) return true;
-    const original = window.renderStudentHomeV1;
-    const wrapped = function(){
-      const ret = original.apply(this, arguments);
-      try{ setTimeout(boot, 0); }catch(_){ }
-      return ret;
-    };
-    wrapped.__sebitPenaltyLogsDirectWrapped = true;
-    window.renderStudentHomeV1 = wrapped;
-    return true;
-  }
-
-  window.addEventListener('load', function(){
-    let tries = 0;
-    const timer = setInterval(function(){
-      tries++;
-      wrapRender();
-      boot();
-      if(tries >= 12) clearInterval(timer);
-    }, 500);
-  });
-  document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(boot, 200); });
 })();
