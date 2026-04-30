@@ -25,6 +25,85 @@ function onSnapshot(ref, next, error){
   return ref.onSnapshot(next, error);
 }
 
+
+/* === Firestore sync: shared auth settings (teacher password / master code) ===
+   - 기준 데이터: sharedState/authSettings.value
+   - 교사 비밀번호와 마스터 코드 해시를 기기별 localStorage가 아니라 서버 기준으로 공유
+   - 학생 PIN은 students 컬렉션의 학생 데이터에 포함되어 이미 공유됨
+*/
+const SEBIT_AUTH_DOC = "authSettings";
+let __sebitAuthLoadingFromFirestore = false;
+let __sebitAuthSyncTimer = null;
+let __sebitAuthRealtimeStarted = false;
+let __sebitUnsubAuthSettings = null;
+
+function sebitAuthLocalValue(){
+  let teacherPw = null;
+  let masterCodeHash = null;
+  try{ teacherPw = localStorage.getItem("sebit:teacherPassword"); }catch(_){}
+  try{ masterCodeHash = localStorage.getItem("sebit:masterCodeHash"); }catch(_){}
+  return {
+    teacherPw: teacherPw || DEFAULT_TEACHER_PW,
+    masterCodeHash: masterCodeHash || "",
+    updatedAt: Date.now()
+  };
+}
+function applyAuthSettingsToLocal(value){
+  if(!value || typeof value !== "object") return;
+  try{
+    __sebitAuthLoadingFromFirestore = true;
+    if(value.teacherPw){ localStorage.setItem("sebit:teacherPassword", String(value.teacherPw)); }
+    if(value.masterCodeHash !== undefined){
+      if(value.masterCodeHash) localStorage.setItem("sebit:masterCodeHash", String(value.masterCodeHash));
+      else localStorage.removeItem("sebit:masterCodeHash");
+    }
+  }catch(err){ console.warn("[SEBIT] auth local apply skipped", err); }
+  finally{ __sebitAuthLoadingFromFirestore = false; }
+}
+async function syncAuthSettingsToFirestoreNow(){
+  if(__sebitAuthLoadingFromFirestore) return;
+  try{
+    const value = sebitAuthLocalValue();
+    await doc(db, "sharedState", SEBIT_AUTH_DOC).set({ key: SEBIT_AUTH_DOC, value, updatedAt: Date.now() }, { merge:false });
+    console.log("[SEBIT] auth settings synced to Firestore");
+  }catch(err){ console.error("[SEBIT] auth settings Firestore sync failed", err); }
+}
+function scheduleAuthSettingsFirestoreSync(){
+  if(__sebitAuthLoadingFromFirestore) return;
+  clearTimeout(__sebitAuthSyncTimer);
+  __sebitAuthSyncTimer = setTimeout(syncAuthSettingsToFirestoreNow, 350);
+}
+async function loadAuthSettingsFromFirestore(){
+  try{
+    __sebitAuthLoadingFromFirestore = true;
+    const snap = await doc(db, "sharedState", SEBIT_AUTH_DOC).get();
+    const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
+    if(exists){
+      const data = snap.data() || {};
+      applyAuthSettingsToLocal(data.value || data);
+      console.log("[SEBIT] auth settings loaded from Firestore");
+    }else{
+      __sebitAuthLoadingFromFirestore = false;
+      await syncAuthSettingsToFirestoreNow();
+      __sebitAuthLoadingFromFirestore = true;
+    }
+  }catch(err){ console.error("[SEBIT] auth settings Firestore load failed", err); }
+  finally{ __sebitAuthLoadingFromFirestore = false; }
+}
+function startAuthSettingsFirestoreRealtimeSync(){
+  if(__sebitAuthRealtimeStarted) return;
+  __sebitAuthRealtimeStarted = true;
+  try{
+    __sebitUnsubAuthSettings = onSnapshot(doc(db, "sharedState", SEBIT_AUTH_DOC), (snap)=>{
+      const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
+      if(!exists) return;
+      const data = snap.data() || {};
+      applyAuthSettingsToLocal(data.value || data);
+      console.log("[SEBIT] auth settings realtime updated");
+    }, (err)=>{ console.error("[SEBIT] auth settings realtime sync failed", err); });
+  }catch(err){ console.error("[SEBIT] auth settings realtime listener failed", err); }
+}
+
 /* === Firestore sync: constitution / law + penalty values (final) ===
    - 기준 데이터: sharedState/constitution.value
    - 교사 메뉴 세빛 헌법 저장값을 서버에 올림
@@ -983,6 +1062,7 @@ let __sebitActivityLoadingFromFirestore = false;
 let __sebitActivitySyncTimer = null;
 let __sebitActivityRealtimeStarted = false;
 let __sebitUnsubActivityState = null;
+  __sebitUnsubAuthSettings = null;
 
 function fsActivityLocalStorageKeyFromName(name){
   try{
@@ -3599,7 +3679,8 @@ function escapeHtml(str) {
     .replaceAll("'","&#039;");
 }
 
-function onTeacherLogin() {
+async function onTeacherLogin() {
+  try{ await loadAuthSettingsFromFirestore(); }catch(_){}
   const input = $("#teacherPwInput");
   const err = $("#teacherLoginError");
   const raw = (input?.value || "").trim();
@@ -3621,7 +3702,8 @@ function onTeacherLogin() {
   showPage("teacher-home");
 }
 
-function onStudentLogin() {
+async function onStudentLogin() {
+  try{ await loadStudentsFromFirestore(); }catch(_){}
   const id = normalizeStudentId($("#studentIdInput")?.value);
   const pin = ($("#studentPinInput")?.value || "").trim();
   const err = $("#studentLoginError");
@@ -10134,6 +10216,7 @@ function sebitStopRealtimeListeners(reason="idle"){
   sebitSafeUnsub(__sebitUnsubThermo, "thermo");
   sebitSafeUnsub(__sebitUnsubJobState, "jobState");
   sebitSafeUnsub(__sebitUnsubActivityState, "activityState");
+  sebitSafeUnsub(__sebitUnsubAuthSettings, "authSettings");
   sebitSafeUnsub(__sebitUnsubShopState, "shopState");
   try{ (Array.isArray(__sebitUnsubShopDocs) ? __sebitUnsubShopDocs : []).forEach((fn, i)=>sebitSafeUnsub(fn, "shopDoc"+i)); }catch(_){ }
   try{ sebitSafeUnsub(window.__sebitEmergencyShopDirectUnsub, "directShop"); }catch(_){ }
@@ -10152,6 +10235,7 @@ function sebitStopRealtimeListeners(reason="idle"){
   __sebitRealtimeStarted = false;
   __sebitConstitutionRealtimeStarted = false;
   __sebitThermoRealtimeStarted = false;
+  __sebitAuthRealtimeStarted = false;
   __sebitShopRealtimeStarted = false;
   __sebitJobRealtimeStarted = false;
 
@@ -10167,6 +10251,7 @@ function sebitStartRealtimeListeners(){
   try{ startConstitutionFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] constitution realtime start skipped", err); }
   try{ startThermoFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] thermo realtime start skipped", err); }
   try{ startActivityFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] activity realtime start skipped", err); }
+  try{ startAuthSettingsFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] auth realtime start skipped", err); }
   try{ if(typeof installDirectShopListener === "function") installDirectShopListener(); }catch(_){ }
   console.log("[SEBIT GUARD] realtime started");
 }
@@ -10193,7 +10278,8 @@ async function sebitResumeRealtimeListeners(reason="activity"){
       loadJobStateFromFirestore(),
       loadConstitutionFromFirestore(),
       loadThermoFromFirestore(),
-      loadActivityStateFromFirestore()
+      loadActivityStateFromFirestore(),
+      loadAuthSettingsFromFirestore()
     ]);
     sebitRefreshVisiblePageAfterResume();
     sebitStartRealtimeListeners();
@@ -10240,7 +10326,7 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
+  Promise.all([loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore(), loadAuthSettingsFromFirestore()]).then(() => {
     // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
