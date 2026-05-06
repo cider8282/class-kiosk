@@ -11534,6 +11534,18 @@ function closeStudentShopPreviewModal(){
     });
     return out;
   };
+  const syncDoneStateNow = (jobId, sid, d) => {
+    try{
+      const keys = [doneKey(jobId, sid, d), doneKey(jobId, '', d), legacyClosedKey(jobId, d), logKey(jobId, d)];
+      if(typeof syncJobKeysToFirestoreNow === 'function'){
+        syncJobKeysToFirestoreNow(keys);
+      }else if(typeof scheduleJobFirestoreSync === 'function'){
+        keys.forEach(k => scheduleJobFirestoreSync(k));
+      }
+      if(typeof refreshJobPagesFromRealtime === 'function') setTimeout(refreshJobPagesFromRealtime, 120);
+      if(window.sebitFinalRefreshJobScreens) setTimeout(window.sebitFinalRefreshJobScreens, 150);
+    }catch(err){ console.warn('[SEBIT] job done immediate sync skipped', err); }
+  };
   const markDone = (jobId, sid) => {
     if(!jobId || !sid) return;
     const d = dayKeySafe();
@@ -11544,6 +11556,7 @@ function closeStudentShopPreviewModal(){
     const log = read(logKey(jobId, d), {});
     log[String(sid)] = { studentId:String(sid), studentName:studentName(sid), at:Date.now() };
     localStorage.setItem(logKey(jobId, d), JSON.stringify(log));
+    syncDoneStateNow(jobId, sid, d);
   };
   const unmarkDone = (jobId, sid) => {
     if(!jobId || !sid) return;
@@ -11554,6 +11567,7 @@ function closeStudentShopPreviewModal(){
     const log = read(logKey(jobId, d), {});
     delete log[String(sid)];
     localStorage.setItem(logKey(jobId, d), JSON.stringify(log));
+    syncDoneStateNow(jobId, sid, d);
   };
   const isDone = (jobId, sid) => localStorage.getItem(doneKey(jobId, sid)) === '1';
   const summarize = jobId => {
