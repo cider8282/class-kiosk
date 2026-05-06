@@ -12097,3 +12097,82 @@ function closeStudentShopPreviewModal(){
 
   document.addEventListener("visibilitychange", function(){ if(!document.hidden) refreshIfShopPage("visible"); });
 })();
+
+/* === SEBIT v65 SAFE PATCH: job checklist status Firestore bridge ===
+   목적: 로그인/홈 전환 코드는 건드리지 않고 학생 직업 체크리스트 마감 상태만 안정적으로 동기화함.
+   - 학생별 마감 키: sebit_jobdone_{jobId}_{YYYY-MM-DD}_{studentId}
+   - 마감 로그 키: sebit_jobdone_log_{jobId}_{YYYY-MM-DD}
+   - 기존 jobState Firestore 감지/저장 함수가 있으면 즉시 동기화 예약함.
+*/
+(function(){
+  if(window.__sebitV65SafeJobStatusPatch) return;
+  window.__sebitV65SafeJobStatusPatch = true;
+
+  function safeToday(){
+    try{ if(typeof todayKey === 'function') return todayKey(); }catch(_){ }
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+  function safeRead(key, fallback){
+    try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }catch(_){ return fallback; }
+  }
+  function safeStudents(){
+    try{ if(typeof LS !== 'undefined' && LS.students) return safeRead(LS.students, []); }catch(_){ }
+    return safeRead('sebit:students_v1', []);
+  }
+  function studentName(sid){
+    const arr = safeStudents();
+    const s = Array.isArray(arr) ? arr.find(x=>String(x && x.id || '') === String(sid || '')) : null;
+    return s ? String(s.name || sid) : String(sid || '');
+  }
+  function jobDoneKey(jobId, sid, day){
+    return `sebit_jobdone_${jobId}_${day || safeToday()}${sid ? '_' + String(sid) : ''}`;
+  }
+  function jobLogKey(jobId, day){
+    return `sebit_jobdone_log_${jobId}_${day || safeToday()}`;
+  }
+  function syncJobKeys(keys){
+    try{
+      if(typeof scheduleJobFirestoreSync === 'function'){
+        keys.forEach(k=>scheduleJobFirestoreSync(k));
+      }else if(typeof syncJobKeysToFirestoreNow === 'function'){
+        syncJobKeysToFirestoreNow(keys);
+      }
+    }catch(err){ console.warn('[SEBIT] job sync schedule skipped', err); }
+  }
+  window.sebitMarkStudentJobDone = function(jobId, sid, done){
+    jobId = String(jobId || '').trim();
+    sid = String(sid || '').trim();
+    if(!jobId || !sid) return;
+    const day = safeToday();
+    const dk = jobDoneKey(jobId, sid, day);
+    const lk = jobLogKey(jobId, day);
+    const log = safeRead(lk, {});
+    if(done === false){
+      try{ localStorage.removeItem(dk); }catch(_){ }
+      try{ delete log[sid]; localStorage.setItem(lk, JSON.stringify(log)); }catch(_){ }
+    }else{
+      try{ localStorage.setItem(dk, '1'); }catch(_){ }
+      try{ log[sid] = { studentId:sid, studentName:studentName(sid), at:Date.now() }; localStorage.setItem(lk, JSON.stringify(log)); }catch(_){ }
+    }
+    syncJobKeys([dk, lk]);
+  };
+
+  // 기존 학생 직업 화면이 열릴 때 현재 학생/직업 context가 있으면 마감 버튼 클릭을 한 번 더 안전하게 보정함.
+  document.addEventListener('click', function(e){
+    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+    if(!btn) return;
+    const overlay = btn.closest('.jobcheck-view-overlay[data-student-opened="1"]');
+    if(!overlay) return;
+    const text = String(btn.textContent || '').replace(/\s+/g,' ').trim();
+    if(!text.includes('마감')) return;
+    const ctx = window.__sebitCurrentStudentJobCtx || {};
+    const jobId = String(overlay.dataset.jobId || ctx.jobId || '').trim();
+    const sid = String((typeof session !== 'undefined' && session && session.studentId) || ctx.sid || '').trim();
+    if(!jobId || !sid) return;
+    window.sebitMarkStudentJobDone(jobId, sid, text.includes('해제') ? false : true);
+  }, true);
+})();
