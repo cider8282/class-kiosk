@@ -12449,3 +12449,180 @@ function closeStudentShopPreviewModal(){
     }, 1500);
   });
 })();
+
+
+/* === SEBIT v67 FIX: legacy global jobdone -> teacher status bridge ===
+   증상: Firestore에는 sebit_jobdone_techkeeper_YYYY-MM-DD = "1" 이 생기지만,
+        교사 직업수행현황관리는 학생별 키(sebit_jobdone_..._학생ID)만 보아 계속 대기로 표시됨.
+   해결: 1) 담당자가 1명인 직업은 기존 전역 마감 키를 그 담당자의 완료로 인정
+        2) 동시에 학생별 키로 자동 보정 저장/동기화
+        3) 기존 로그인/화면 전환 코드는 수정하지 않음
+*/
+(function(){
+  if(window.__sebitV67LegacyJobDoneBridge) return;
+  window.__sebitV67LegacyJobDoneBridge = true;
+
+  const JOBS = [
+    { id:'ranger', name:'교실 레인저', aliases:['교실 레인저','레인저'] },
+    { id:'fairjustice', name:'페어 저스티스', aliases:['페어 저스티스','공정'] },
+    { id:'timekeeper', name:'타임 키퍼', aliases:['타임 키퍼','시간'] },
+    { id:'techkeeper', name:'테크 키퍼', aliases:['테크 키퍼','패드','기기'] },
+    { id:'studycheck', name:'학습 체크단', aliases:['학습 체크단','준비물'] },
+    { id:'tidymaster', name:'정리 마스터', aliases:['정리 마스터','정리'] },
+    { id:'lightguardian_front', name:'빛의 파수꾼(앞)', aliases:['빛의 파수꾼(앞)','빛의 파수꾼 앞','파수꾼 앞'] },
+    { id:'lightguardian_back', name:'빛의 파수꾼(뒤)', aliases:['빛의 파수꾼(뒤)','빛의 파수꾼 뒤','파수꾼 뒤'] },
+    { id:'artcurator', name:'작품 큐레이터', aliases:['작품 큐레이터','작품'] },
+    { id:'greensaver', name:'그린 세이버', aliases:['그린 세이버','분리배출','환경'] },
+    { id:'docmaster', name:'문서 마스터', aliases:['문서 마스터','문서'] },
+    { id:'weathercaster', name:'웨더 캐스터', aliases:['웨더 캐스터','날씨'] },
+    { id:'lunchsaver', name:'런치 세이버', aliases:['런치 세이버','런치마스터','급식'] },
+    { id:'lightmerchant', name:'빛의 상인', aliases:['빛의 상인','상점','상인'] }
+  ];
+
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  const norm = v => String(v||'').replace(/\s+/g,'').toLowerCase();
+  const dayKeySafe = () => {
+    try{ if(typeof todayKey === 'function') return todayKey(); }catch(_){ }
+    try{ if(typeof today === 'function') return today(); }catch(_){ }
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  const readJSONSafe = (k, fb) => { try{ const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) : fb; }catch(_){ return fb; } };
+  const students = () => {
+    try{
+      const k = (typeof LS !== 'undefined' && LS.students) ? LS.students : 'sebit:students';
+      const arr = readJSONSafe(k, []);
+      return Array.isArray(arr) ? arr : [];
+    }catch(_){ return []; }
+  };
+  const studentName = sid => {
+    const s = students().find(x => String(x && x.id || '') === String(sid||''));
+    return s ? String(s.name || sid) : String(sid || '');
+  };
+  const matchJob = name => {
+    const n = norm(name);
+    return JOBS.find(j => [j.name, ...(j.aliases||[])].some(a => n.includes(norm(a)) || norm(a).includes(n))) || null;
+  };
+  const doneKey = (jobId, d=dayKeySafe(), sid='') => `sebit_jobdone_${jobId}_${d}${sid ? '_' + String(sid) : ''}`;
+  const closedKey = (jobId, d=dayKeySafe()) => `sebit_${jobId}_closed_${d}`;
+  const logKey = (jobId, d=dayKeySafe()) => `sebit_jobdone_log_${jobId}_${d}`;
+  const assign = () => readJSONSafe('sebit:jobsAssign_v1', {version:1,jobs:{}});
+  const holdersOf = jobId => {
+    const out = [];
+    const cur = assign() && assign().jobs ? (assign().jobs[jobId] || {}) : {};
+    const raw = Array.isArray(cur.holders) ? cur.holders : (Array.isArray(cur.students) ? cur.students : []);
+    raw.forEach(id => { const sid=String(id||''); if(sid && !out.includes(sid)) out.push(sid); });
+    students().forEach(st => {
+      const sid = String(st && st.id || '');
+      const js = Array.isArray(st && st.jobs) ? st.jobs : [];
+      if(sid && js.some(x => { const j = matchJob(String(x)); return j && j.id === jobId; }) && !out.includes(sid)) out.push(sid);
+    });
+    return out;
+  };
+
+  function forceSync(keys){
+    const list = Array.from(new Set((keys||[]).map(String).filter(Boolean)));
+    if(!list.length) return;
+    try{
+      if(typeof window.sebitV66ForceSyncJobKeys === 'function'){
+        window.sebitV66ForceSyncJobKeys(list);
+        return;
+      }
+      if(typeof syncJobKeysToFirestoreNow === 'function'){
+        syncJobKeysToFirestoreNow(list);
+      }
+    }catch(_){ }
+  }
+
+  function migrateSingleHolderLegacy(jobId, d=dayKeySafe()){
+    const holders = holdersOf(jobId);
+    const legacy = localStorage.getItem(doneKey(jobId,d,'')) === '1' || localStorage.getItem(closedKey(jobId,d)) === '1';
+    if(!legacy || holders.length !== 1) return;
+    const sid = holders[0];
+    const dk = doneKey(jobId,d,sid);
+    if(localStorage.getItem(dk) !== '1'){
+      try{ localStorage.setItem(dk, '1'); }catch(_){ }
+      const log = readJSONSafe(logKey(jobId,d), {});
+      log[String(sid)] = log[String(sid)] || { studentId:String(sid), studentName:studentName(sid), at:Date.now(), fromLegacy:true };
+      try{ localStorage.setItem(logKey(jobId,d), JSON.stringify(log)); }catch(_){ }
+      forceSync([dk, logKey(jobId,d)]);
+    }
+  }
+
+  function isDoneEffective(jobId, sid, d=dayKeySafe()){
+    if(localStorage.getItem(doneKey(jobId,d,sid)) === '1') return true;
+    const log = readJSONSafe(logKey(jobId,d), {});
+    if(log && log[String(sid)]) return true;
+    const holders = holdersOf(jobId);
+    const legacy = localStorage.getItem(doneKey(jobId,d,'')) === '1' || localStorage.getItem(closedKey(jobId,d)) === '1';
+    // 기존 체크리스트가 전역 마감 키만 남기는 경우: 담당자가 1명일 때만 그 학생 완료로 인정
+    if(legacy && holders.length === 1 && String(holders[0]) === String(sid)){
+      migrateSingleHolderLegacy(jobId, d);
+      return true;
+    }
+    return false;
+  }
+
+  // 전역 마감 키가 생기는 즉시 담당자 1명 직업은 학생별 키로 보정한다.
+  function scanLegacyDone(){
+    const d = dayKeySafe();
+    JOBS.forEach(j => migrateSingleHolderLegacy(j.id, d));
+  }
+  setTimeout(scanLegacyDone, 300);
+  setInterval(scanLegacyDone, 2500);
+
+  window.renderJobPerformanceAdmin = function(root){
+    const d = dayKeySafe();
+    scanLegacyDone();
+    const completed = JOBS.filter(j => { const h = holdersOf(j.id); return h.length && h.every(sid => isDoneEffective(j.id, sid, d)); }).length;
+    const summarize = jobId => {
+      const log = readJSONSafe(logKey(jobId,d), {});
+      const data = readJSONSafe(`sebit_${jobId}_${d}`, {});
+      const parts = [];
+      const count = Object.keys(log||{}).length;
+      if(count) parts.push(`마감 ${count}명`);
+      if(data && typeof data === 'object'){
+        if(data.memo) parts.push('메모: ' + String(data.memo));
+        const entries = Object.entries(data).filter(([,v]) => v && typeof v === 'object');
+        if(entries.length){
+          const filled = entries.filter(([,v]) => Object.values(v).some(x => x === true || (typeof x === 'string' && x.trim())));
+          if(filled.length) parts.push(`기록 학생 ${filled.length}명`);
+        }
+      }
+      return parts.length ? parts.join(' · ') : '마감 기록 있음';
+    };
+    root.innerHTML = `
+      <style>
+        .jobperf-wrap{display:grid;gap:14px}.jobperf-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.jobperf-summary{display:flex;gap:10px;flex-wrap:wrap}.jobperf-pill{padding:10px 14px;border:1px solid rgba(0,0,0,.08);border-radius:16px;background:rgba(255,255,255,.7);font-weight:800}.jobperf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.jobperf-card{border:1px solid rgba(0,0,0,.08);border-radius:18px;background:rgba(255,255,255,.78);padding:14px;box-shadow:0 8px 22px rgba(0,0,0,.04)}.jobperf-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:8px}.jobperf-title{font-size:16px;font-weight:900}.jobperf-badge{font-size:12px;font-weight:900;border-radius:999px;padding:6px 10px;white-space:nowrap}.jobperf-badge.done{background:#dff5e8;color:#176c3b;border:1px solid #bde8cf}.jobperf-badge.partial{background:#e8f0ff;color:#2855b8;border:1px solid #c8d8ff}.jobperf-badge.wait{background:#fff4d9;color:#7b5200;border:1px solid #f0dc9b}.jobperf-meta{font-size:13px;color:#666;line-height:1.5;margin-top:6px}.jobperf-result{margin-top:10px;padding:10px;border-radius:14px;background:rgba(245,247,250,.9);font-size:13px;line-height:1.5;color:#444}.jobperf-students{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.jobperf-student{font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;border:1px solid rgba(0,0,0,.08);background:#fff}.jobperf-student.done{background:#dff5e8;color:#176c3b;border-color:#bde8cf}.jobperf-student.wait{background:#fff4d9;color:#7b5200;border-color:#f0dc9b}.jobperf-tools{display:flex;justify-content:flex-end;gap:8px}
+      </style>
+      <div class="jobperf-wrap">
+        <div class="jobperf-head"><div class="muted">${esc(d)} 기준 · 기존 전역 마감 키도 담당자 1명 직업은 완료로 보정합니다.</div><div class="jobperf-summary"><div class="jobperf-pill">전체 완료 ${completed} / ${JOBS.length}</div><div class="jobperf-pill">진행 중 ${JOBS.length-completed}</div></div></div>
+        <div class="jobperf-tools"><button class="btn small" type="button" id="jobperfRefreshBtn">새로고침</button></div>
+        <div class="jobperf-grid">
+          ${JOBS.map(j=>{
+            const h = holdersOf(j.id);
+            const done = h.filter(sid => isDoneEffective(j.id, sid, d));
+            const all = h.length && done.length === h.length;
+            const any = done.length > 0;
+            const cls = all ? 'done' : (any ? 'partial' : 'wait');
+            const label = all ? '마감 완료' : (any ? `일부 마감 ${done.length}/${h.length}` : '대기 중');
+            return `<div class="jobperf-card"><div class="jobperf-top"><div class="jobperf-title">${esc(j.name)}</div><div class="jobperf-badge ${cls}">${esc(label)}</div></div><div class="jobperf-meta">담당: ${h.length ? esc(h.map(studentName).join(', ')) : '배정 없음'}</div>${h.length ? `<div class="jobperf-students">${h.map(sid=>`<span class="jobperf-student ${isDoneEffective(j.id,sid,d)?'done':'wait'}">${esc(studentName(sid))} · ${isDoneEffective(j.id,sid,d)?'완료':'대기'}</span>`).join('')}</div>` : ''}<div class="jobperf-result">${any ? esc(summarize(j.id)) : '아직 학생 체크리스트가 마감되지 않았습니다.'}</div></div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    const btn = root.querySelector('#jobperfRefreshBtn');
+    if(btn) btn.addEventListener('click', () => window.renderJobPerformanceAdmin(root));
+  };
+
+  // 실시간 반영 후 교사 현황창이 열려 있으면 다시 렌더링
+  const oldRefresh = window.sebitFinalRefreshJobScreens || null;
+  window.sebitFinalRefreshJobScreens = function(){
+    try{ if(typeof oldRefresh === 'function') oldRefresh(); }catch(_){ }
+    try{
+      scanLegacyDone();
+      if(String(location.hash || '') === '#admin-job-status' && typeof openAdminModal === 'function'){
+        openAdminModal({ key:'job-status', title:'직업 수행현황 관리' });
+      }
+    }catch(_){ }
+  };
+})();
