@@ -4,8 +4,8 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <title>SEBIT Light World</title>
-  <!-- SEBIT cost guard build -->
   <link rel="stylesheet" href="style.css"/>
+  <script defer src="app.js"></script>
 </head>
 <body>
   <div class="app">
@@ -699,7 +699,6 @@
             </div>
             <div class="student-v1-penaltyEmpty muted" id="studentPenaltyEmpty">모범 시민 진행 중</div>
             <ul class="student-v1-penalty" id="studentPenaltyList"></ul>
-            <button class="btn soft wide" id="viewMyPenaltyLogsBtn" type="button" style="margin:10px 0;">내 최근 벌점 기록 보기</button>
             <div class="muted small">(학생은 수정/삭제 불가)</div>
           </section>
 
@@ -1068,7 +1067,9 @@
 
   </div>
 
+  
 
+<script src="inject_activity_dummy.js"></script>
 
     <!-- MODAL: QUEST VIEW (학생/교사 공용 보기) -->
     <div class="modal quest-modal hidden" id="questViewModal" role="dialog" aria-modal="true" aria-label="퀘스트 보기">
@@ -1095,25 +1096,6 @@
 
 <!-- SEBIT Safety: localStorage backup tool -->
 <a href="backup_tool.html" style="position:fixed; right:14px; bottom:14px; z-index:9999; text-decoration:none;" class="btn small">백업</a>
-
-
-<!-- Firebase (iPad Safari 호환 방식: compat) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyCKcYXyywiJuThbboYZDtHSbmhwGyj5Vpo",
-    authDomain: "sebit-class-2026.firebaseapp.com",
-    projectId: "sebit-class-2026",
-    storageBucket: "sebit-class-2026.firebasestorage.app",
-    messagingSenderId: "255915011407",
-    appId: "1:255915011407:web:e38e2dccc175226a9da93a"
-  };
-
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.firestore();
-</script>
-<script src="app.js"></script>
 
 </body>
 </html>
