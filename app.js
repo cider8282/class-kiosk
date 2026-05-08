@@ -1,8 +1,3 @@
-window.__activityManualToggle = window.__activityManualToggle || {};
-
-// [v63 combined fix] 교사 활동기록 펼치기 상태 유지용 전역값
-window.__sebitOpenActivityStudentId = window.__sebitOpenActivityStudentId || null;
-
 // Firebase 연결은 index.html의 compat script에서 처리함 (iPad Safari 호환)
 // 기존 modular 코드 형태를 유지하기 위한 compat 래퍼
 function collection(dbObj, collectionName){
@@ -1694,8 +1689,7 @@ function renderStudentPocket(){
     `;
     const btn = wrap.querySelector("button");
     if(btn && !requesting){
-      btn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btn.addEventListener("click", ()=>{
         // 선착순 30건(하루) 초과 시: 신청 불가 안내(라이트 포켓에서)
         if(shopIsClosed()){
           toast("오늘 상품 지급 신청이 마감되었어요.");
@@ -1949,8 +1943,7 @@ const cards = filtered.map(p=>{
     `;
     const btn = wrap.querySelector(".lightshop-buy");
     if(btn){
-      btn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btn.addEventListener("click", ()=>{
         openPurchaseConfirm(p.id);
       });
     }
@@ -2037,8 +2030,7 @@ function openPurchaseConfirm(productId){
 
   const okBtn = modal.querySelector("#purchaseOkBtn");
   if(okBtn){
-    okBtn.onclick = (e) => {
-    if (e) e.stopPropagation();
+    okBtn.onclick = ()=>{
       closePurchaseConfirm();
       shopTryPurchase(productId);
     };
@@ -3164,8 +3156,7 @@ function buildCharGrid(){
       <div class="muted small">#${i}</div>
     `;
 
-    btn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btn.addEventListener("click", () => {
       try {
         localStorage.setItem("studentAvatar_" + session.studentId, path);
       } catch (_) {}
@@ -3276,17 +3267,12 @@ function renderStudentActivity(){
   if (mCancelBtn) mCancelBtn.disabled = !rec.morning || locked;
 
   // reading draft -> inputs
-  // [v63 combined fix]
-  // 자동저장/Firestore 동기화로 화면이 다시 렌더될 때,
-  // 학생이 현재 입력 중인 독서 제목/쪽수 칸의 value를 덮어쓰지 않음.
   const t = $("#studentReadTitle");
   const s = $("#studentReadStart");
   const e = $("#studentReadEnd");
-  const active = document.activeElement;
-
-  if (t && active !== t) t.value = rec.readingDraft?.title ?? "";
-  if (s && active !== s) s.value = rec.readingDraft?.start ?? "";
-  if (e && active !== e) e.value = rec.readingDraft?.end ?? "";
+  if (t) t.value = rec.readingDraft?.title ?? "";
+  if (s) s.value = rec.readingDraft?.start ?? "";
+  if (e) e.value = rec.readingDraft?.end ?? "";
 
   if (t) t.disabled = locked;
   if (s) s.disabled = locked;
@@ -3523,8 +3509,7 @@ function renderTeacherActivity(){
     const pill = tr.querySelector(".activity-pill");
     const dtr = makeDetailRow(reading, s.id, s.name, (cnt)=>{ if (pill) pill.textContent = `${cnt}/3`; });
     const toggleBtn = tr.querySelector('[data-action="toggle"]');
-    toggleBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    toggleBtn.addEventListener("click", ()=>{
       const open = !dtr.classList.contains("hidden");
       if (open) {
         dtr.classList.add("hidden");
@@ -3584,8 +3569,7 @@ function openActivityHistory(studentId, studentName){
       const del = document.createElement("button");
       del.className = "btn danger";
       del.textContent = "삭제";
-      del.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      del.addEventListener("click", ()=>{
         const h = readJSON(LS.activityReadingHistory, {});
         const arr = Array.isArray(h[studentId]) ? h[studentId] : [];
         const target = rows[idx];
@@ -4283,10 +4267,8 @@ function bind() {
 
   $("#studentLogoutBtn")?.addEventListener("click", logoutToIntro);
   $("#studentCloseBtn")?.addEventListener("click", ()=> showPage("student-dashboard"));
-  $("#studentProfileBtn")?.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); $("#studentQuickModal")?.classList.remove("hidden"); });
-  $("#studentQuickCloseBtn")?.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); $("#studentQuickModal")?.classList.add("hidden"); });
+  $("#studentProfileBtn")?.addEventListener("click", ()=> { $("#studentQuickModal")?.classList.remove("hidden"); });
+  $("#studentQuickCloseBtn")?.addEventListener("click", ()=> { $("#studentQuickModal")?.classList.add("hidden"); });
   $("#studentQuickModal")?.addEventListener("click", (e)=>{ if(e.target && e.target.id==="studentQuickModal"){ $("#studentQuickModal").classList.add("hidden"); } });
 
   // Bank handlers are wired in wireStudentBankButtons().
@@ -4395,13 +4377,11 @@ function bind() {
 
   // Reading commit
   $("#btnStudentReadAdd")?.addEventListener("click", ()=> commitReadingEntry());
-  $("#btnStudentReadEdit")?.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); applyReadingSelection(); });
+  $("#btnStudentReadEdit")?.addEventListener("click", ()=> { applyReadingSelection(); });
 
 
   // Reading: 1줄 미리보기 토글 + 드롭다운 변경 시 미리보기 갱신
-  $("#studentReadingPreview")?.addEventListener('click', (e) => {
-    if (e) e.stopPropagation();
+  $("#studentReadingPreview")?.addEventListener('click', ()=>{
     const panel = $("#studentReadingPanel");
     if (!panel) return;
     panel.classList.toggle('collapsed');
@@ -4536,8 +4516,7 @@ function bind() {
         const btn = el("button","admin-cat-btn"+(cat.id===selectedCatId?" active":""));
         btn.type="button";
         btn.textContent = cat.name;
-        btn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        btn.addEventListener("click", ()=>{
           selectedCatId = cat.id;
           editingId = null;
           render();
@@ -4555,8 +4534,7 @@ function bind() {
       const addBtn = el("button","admin-btn");
       addBtn.type="button";
       addBtn.textContent="조항 추가";
-      addBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      addBtn.addEventListener("click", ()=>{
         if(!selCat) return;
         const newNum = (Array.isArray(selCat.items) ? selCat.items.length : 0) + 1;
         const newItem = {
@@ -4577,15 +4555,13 @@ function bind() {
 
       const saveBtn = el("button","admin-btn primary","저장");
       saveBtn.type="button";
-      saveBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      saveBtn.addEventListener("click", ()=>{
         commitSave();
       });
 
       const resetBtn = el("button","admin-btn ghost","초기화");
       resetBtn.type="button";
-      resetBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      resetBtn.addEventListener("click", ()=>{
         localStorage.removeItem(LS_KEYS.constitution);
         state = getConstitutionState();
         saveConstitutionState(state);
@@ -4597,8 +4573,7 @@ function bind() {
       // Export / Import (JSON)
       const exportBtn = el("button","admin-btn ghost","내보내기");
       exportBtn.type="button";
-      exportBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      exportBtn.addEventListener("click", ()=>{
         commitSave(false);
         const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
         const a = document.createElement("a");
@@ -4663,16 +4638,14 @@ function bind() {
 
         const editBtn = el("button","admin-mini-btn", editingId===item.id?"닫기":"수정");
         editBtn.type="button";
-        editBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        editBtn.addEventListener("click", ()=>{
           editingId = (editingId===item.id) ? null : item.id;
           render();
         });
 
         const toggleBtn = el("button","admin-mini-btn ghost", item.active?"사용 안 함":"사용");
         toggleBtn.type="button";
-        toggleBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        toggleBtn.addEventListener("click", ()=>{
           item.active = !item.active;
           markDirty();
           render();
@@ -4793,12 +4766,10 @@ function bind() {
       const tabs = el("div","admin-cat-list");
       const t1 = el("button","admin-cat-btn"+(tab==="teacher"?" active":""),"교사 기본 설정");
       t1.type="button";
-      t1.addEventListener("click",(e) => {
-    if (e) e.stopPropagation(); tab="teacher"; render(); });
+      t1.addEventListener("click",()=>{ tab="teacher"; render(); });
       const t2 = el("button","admin-cat-btn"+(tab==="roster"?" active":""),"학생 명단 관리");
       t2.type="button";
-      t2.addEventListener("click",(e) => {
-    if (e) e.stopPropagation(); tab="roster"; render(); });
+      t2.addEventListener("click",()=>{ tab="roster"; render(); });
       tabs.append(t1,t2);
       sidebar.appendChild(tabs);
 
@@ -4927,8 +4898,7 @@ function bind() {
         const toolbar = el("div","admin-toolbar");
         const addBtn = el("button","admin-btn");
         addBtn.type="button"; addBtn.textContent = "전입 추가";
-        addBtn.addEventListener("click",(e) => {
-    if (e) e.stopPropagation();
+        addBtn.addEventListener("click",()=>{
           const id = nextStudentId(students);
           students.push({ id, name:"", gender:"미지정", pin: DEFAULT_PIN, lumens:0, xp:0, active:true, character:"" });
           saveStudents();
@@ -4952,16 +4922,14 @@ function bind() {
 
           const editBtn = el("button","admin-btn");
           editBtn.type="button"; editBtn.textContent = "수정";
-          editBtn.addEventListener("click",(e) => {
-    if (e) e.stopPropagation();
+          editBtn.addEventListener("click",()=>{
             const ed = row.querySelector(".admin-editor");
             if(ed) ed.classList.toggle("hidden");
           });
           const toggleBtn = el("button","admin-btn outline");
           toggleBtn.type="button";
           toggleBtn.textContent = s.active===false ? "사용" : "전출";
-          toggleBtn.addEventListener("click",(e) => {
-    if (e) e.stopPropagation();
+          toggleBtn.addEventListener("click",()=>{
             s.active = !(s.active===false);
             saveStudents();
             render();
@@ -4969,8 +4937,7 @@ function bind() {
           const deleteBtn = el("button","admin-btn");
           deleteBtn.type = "button";
           deleteBtn.textContent = "삭제";
-          deleteBtn.addEventListener("click",(e) => {
-    if (e) e.stopPropagation();
+          deleteBtn.addEventListener("click",()=>{
             const label = `${s.id || ""}${s.name ? " · " + s.name : ""}`;
             if(!confirm(`정말 삭제할까요?\n${label}\n삭제 후에는 복구되지 않습니다.`)) return;
             students = students.filter(x => String(x.id) !== String(s.id));
@@ -5004,8 +4971,7 @@ function bind() {
           });
           const pinReset = el("button","admin-btn");
           pinReset.type="button"; pinReset.textContent="PIN 초기화";
-          pinReset.addEventListener("click",(e) => {
-    if (e) e.stopPropagation();
+          pinReset.addEventListener("click",()=>{
             s.pin = DEFAULT_PIN;
             saveStudents();
             meta.textContent = `PIN: ${s.pin || DEFAULT_PIN} · 성별: ${s.gender || "미지정"}`;
@@ -5156,8 +5122,7 @@ function bind() {
         card.appendChild(el("div","name", j.name));
         card.appendChild(el("div","sub muted","체크리스트 페이지 연결 예정"));
         const openBtn = el("button","btn small","열기");
-        openBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        openBtn.addEventListener("click", ()=>{
 if(j.id==="studycheck"){
     const ov = el("div","jobcheck-view-overlay");
     const p = el("div","jobcheck-view weather-view");
@@ -5272,14 +5237,12 @@ if(j.id==="studycheck"){
       renderRows();
     };
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnClose.addEventListener("click", ()=>{
       setClosed(true);
       localStorage.setItem(kDone,"1");
       syncUI();
     });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnOpen.addEventListener("click", ()=>{
       setClosed(false);
       localStorage.removeItem(kDone);
       syncUI();
@@ -5407,14 +5370,12 @@ if(j.id==="tidymaster"){
       btnOpen.disabled = !closed;
     };
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnClose.addEventListener("click", ()=>{
       setClosed(true);
       localStorage.setItem(kDone,"1");
       applyClosed();
     });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnOpen.addEventListener("click", ()=>{
       setClosed(false);
       localStorage.removeItem(kDone);
       applyClosed();
@@ -5575,14 +5536,12 @@ if(j.id==="artcurator"){
       btnOpen.disabled = !closed;
     };
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnClose.addEventListener("click", ()=>{
       setClosed(true);
       localStorage.setItem(kDone,"1");
       applyClosed();
     });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnOpen.addEventListener("click", ()=>{
       setClosed(false);
       localStorage.removeItem(kDone);
       applyClosed();
@@ -5713,14 +5672,12 @@ if(j.id==="lunchsaver"){
       tbody.querySelectorAll("input").forEach(inp=> inp.disabled = locked);
     };
 
-    closeBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    closeBtn.addEventListener("click", ()=>{
       setClosed(true);
       localStorage.setItem(kDone,"1");
       syncLock();
     });
-    openBtn2.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    openBtn2.addEventListener("click", ()=>{
       setClosed(false);
       localStorage.setItem(kDone,"0");
       syncLock();
@@ -5822,8 +5779,7 @@ if(j.id==="timekeeper"){
         box.className = "tk-box" + (sel===opt ? " checked" : "");
         box.setAttribute("aria-label", label);
         td.appendChild(box);
-        td.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        td.addEventListener("click", ()=>{
           if(lock || isClosed()) return;
           const cur = read();
           cur[stu.id] = opt; // 단일 선택
@@ -5880,8 +5836,7 @@ if(j.id==="timekeeper"){
     }
   };
 
-  btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnClose.addEventListener("click", ()=>{
     if(lock || isClosed()) return;
     const data = read();
     if(!allDone(data)) return;
@@ -5890,8 +5845,7 @@ if(j.id==="timekeeper"){
     renderRows();
     renderFoot();
   });
-  btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnOpen.addEventListener("click", ()=>{
     if(lock || !isClosed()) return;
     setClosed(false);
     localStorage.setItem(kDone,"0");
@@ -5994,8 +5948,7 @@ if(j.id==="timekeeper"){
       cancelBtn.addEventListener("click", ()=> overlay.remove());
       const okBtn = el("button","btn small", mode==="apply" ? "벌점 부과" : "벌점 취소");
       okBtn.disabled = lock || candidates.length===0;
-      okBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      okBtn.addEventListener("click", ()=>{
         const checked = Array.from(picks.querySelectorAll("input[type=checkbox]:checked")).map(c=>c.dataset.sid);
         if(checked.length===0){ toast("학생을 선택하세요."); return; }
 
@@ -6129,8 +6082,7 @@ if(j.id==="timekeeper"){
       detail.style.padding = "6px 10px 12px";
       if(groupIdx===0) rightInfo.textContent = `${group.items.length}개 조항  ▴`;
 
-      head.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      head.addEventListener("click", ()=>{
         const open = detail.style.display !== "none";
         detail.style.display = open ? "none" : "block";
         rightInfo.textContent = `${group.items.length}개 조항  ${open ? "▾" : "▴"}`;
@@ -6179,14 +6131,12 @@ if(j.id==="timekeeper"){
       rangerCloseBtn.disabled = !!done;
       rangerOpenBtn.disabled = !done;
     };
-    rangerCloseBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    rangerCloseBtn.addEventListener("click", ()=>{
       try{ localStorage.setItem(rangerDoneKey,"1"); }catch(_){}
       renderRangerFoot();
       if(typeof toast === "function") toast("교실 레인저 기록 마감");
     });
-    rangerOpenBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    rangerOpenBtn.addEventListener("click", ()=>{
       try{ localStorage.removeItem(rangerDoneKey); }catch(_){}
       renderRangerFoot();
       if(typeof toast === "function") toast("교실 레인저 마감 해제");
@@ -6289,8 +6239,7 @@ if(j.id==="timekeeper"){
         `;
         const b = tr.querySelector("button");
         if(b){
-          b.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+          b.addEventListener("click", ()=>{
             if(lmIsClosed()){ toast("마감 상태입니다."); return; }
             if(!confirm("상품을 잘 전달했나요?")) return;
             const all = lmGetTodayList();
@@ -6327,10 +6276,8 @@ if(j.id==="timekeeper"){
       });
     };
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); lmSetClosed(true); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); lmSetClosed(false); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ lmSetClosed(true); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ lmSetClosed(false); rerender(); toast("마감 해제"); });
 
     body.appendChild(card);
     p.appendChild(body);
@@ -6454,10 +6401,8 @@ if(j.id==="greensaver"){
     const ctl = el("div","weather-ctl");
     const btnClose = el("button","btn","기록 마감");
     const btnOpen = el("button","btn","마감 해제");
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
     ctl.appendChild(btnClose);
     ctl.appendChild(btnOpen);
     card.appendChild(ctl);
@@ -6606,8 +6551,7 @@ if(j.id==="weathercaster"){
     const sentBtn = el("button","weather-sent-btn");
     sentBtn.type="button";
     sentBtn.innerHTML = `<span class="sun">🌤️</span><span>오늘 예보 전달했어요</span>`;
-    sentBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    sentBtn.addEventListener("click", ()=>{
       if(state.closed) return;
       if(state.sent) return;
       state.sent = true;
@@ -6628,10 +6572,8 @@ if(j.id==="weathercaster"){
     const ctl = el("div","weather-ctl");
     const btnClose = el("button","btn","기록 마감");
     const btnOpen = el("button","btn","마감 해제");
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
     ctl.appendChild(btnClose);
     ctl.appendChild(btnOpen);
     card.appendChild(ctl);
@@ -6784,15 +6726,13 @@ if(j.id==="fairjustice"){
     btnRow.appendChild(btnUnclose);
     panel.appendChild(btnRow);
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnClose.addEventListener("click", ()=>{
       setClosed(true);
       syncUI();
       toast("기록 마감");
     });
 
-    btnUnclose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnUnclose.addEventListener("click", ()=>{
       setClosed(false);
       syncUI();
       toast("마감 해제");
@@ -6810,8 +6750,7 @@ if(j.id==="fairjustice"){
       const box = el("div","fj-msg");
       box.appendChild(el("div","fj-msg-text","오늘 활동 중 확인이 필요한 점이 있어요.\n쉬는 시간에 선생님과 함께 이야기해요."));
       const ok = el("button","btn primary","확인");
-      ok.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); if(msgOv){ msgOv.remove(); msgOv=null; } });
+      ok.addEventListener("click", ()=>{ if(msgOv){ msgOv.remove(); msgOv=null; } });
       box.appendChild(ok);
       msgOv.appendChild(box);
       ov.appendChild(msgOv);
@@ -6977,14 +6916,12 @@ if(j.id==="studycheck"){
       renderRows();
     };
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnClose.addEventListener("click", ()=>{
       setClosed(true);
       localStorage.setItem(kDone,"1");
       syncUI();
     });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    btnOpen.addEventListener("click", ()=>{
       setClosed(false);
       localStorage.removeItem(kDone);
       syncUI();
@@ -7077,8 +7014,7 @@ if(j.id==="timekeeper"){
         box.className = "tk-box" + (sel===opt ? " checked" : "");
         box.setAttribute("aria-label", label);
         td.appendChild(box);
-        td.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        td.addEventListener("click", ()=>{
           if(lock || isClosed()) return;
           const cur = read();
           cur[stu.id] = opt; // 단일 선택
@@ -7135,8 +7071,7 @@ if(j.id==="timekeeper"){
     }
   };
 
-  btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnClose.addEventListener("click", ()=>{
     if(lock || isClosed()) return;
     const data = read();
     if(!allDone(data)) return;
@@ -7145,8 +7080,7 @@ if(j.id==="timekeeper"){
     renderRows();
     renderFoot();
   });
-  btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnOpen.addEventListener("click", ()=>{
     if(lock || !isClosed()) return;
     setClosed(false);
     localStorage.setItem(kDone,"0");
@@ -7257,8 +7191,7 @@ if(j.id==="timekeeper"){
         `;
         const b = tr.querySelector("button");
         if(b){
-          b.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+          b.addEventListener("click", ()=>{
             if(lmIsClosed()){ toast("마감 상태입니다."); return; }
             if(!confirm("상품을 잘 전달했나요?")) return;
             const all = lmGetTodayList();
@@ -7295,10 +7228,8 @@ if(j.id==="timekeeper"){
       });
     };
 
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); lmSetClosed(true); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); lmSetClosed(false); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ lmSetClosed(true); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ lmSetClosed(false); rerender(); toast("마감 해제"); });
 
     body.appendChild(card);
     p.appendChild(body);
@@ -7423,10 +7354,8 @@ if(j.id==="timekeeper"){
     const ctl = el("div","weather-ctl");
     const btnClose = el("button","btn","기록 마감");
     const btnOpen = el("button","btn","마감 해제");
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
     ctl.appendChild(btnClose);
     ctl.appendChild(btnOpen);
     card.appendChild(ctl);
@@ -7574,10 +7503,8 @@ if(j.id==="greensaver"){
     const ctl = el("div","weather-ctl");
     const btnClose = el("button","btn","기록 마감");
     const btnOpen = el("button","btn","마감 해제");
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
     ctl.appendChild(btnClose);
     ctl.appendChild(btnOpen);
     card.appendChild(ctl);
@@ -7723,8 +7650,7 @@ if(j.id==="weathercaster"){
     const sentBtn = el("button","weather-sent-btn");
     sentBtn.type="button";
     sentBtn.innerHTML = `<span class="sun">🌤️</span><span>오늘 예보 전달했어요</span>`;
-    sentBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    sentBtn.addEventListener("click", ()=>{
       if(state.closed) return;
       if(state.sent) return;
       state.sent = true;
@@ -7745,10 +7671,8 @@ if(j.id==="weathercaster"){
     const ctl = el("div","weather-ctl");
     const btnClose = el("button","btn","기록 마감");
     const btnOpen = el("button","btn","마감 해제");
-    btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
-    btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
+    btnClose.addEventListener("click", ()=>{ state.closed=true; saveState(state); rerender(); toast("기록 마감"); });
+    btnOpen.addEventListener("click", ()=>{ state.closed=false; saveState(state); rerender(); toast("마감 해제"); });
     ctl.appendChild(btnClose);
     ctl.appendChild(btnOpen);
     card.appendChild(ctl);
@@ -7893,14 +7817,12 @@ if(j.id==="techkeeper"){
     Array.from(tbody.querySelectorAll("input[type='checkbox']")).forEach(i=> i.disabled = isClosed());
   };
 
-  btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnClose.addEventListener("click", ()=>{
     setClosed(true);
     try{ localStorage.setItem(kDone,"1"); }catch(e){}
     renderFoot();
   });
-  btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnOpen.addEventListener("click", ()=>{
     setClosed(false);
     try{ localStorage.removeItem(kDone); }catch(e){}
     renderFoot();
@@ -8025,15 +7947,13 @@ if(j.id==="docmaster"){
   const ctl = el("div","weather-ctl");
   const btnClose = el("button","btn","기록 마감");
   const btnOpen = el("button","btn","마감 해제");
-  btnClose.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnClose.addEventListener("click", ()=>{
     setClosed(true);
     try{ localStorage.setItem(kDone,"1"); }catch(e){}
     rerender();
     toast("기록 마감");
   });
-  btnOpen.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  btnOpen.addEventListener("click", ()=>{
     setClosed(false);
     try{ localStorage.removeItem(kDone); }catch(e){}
     rerender();
@@ -8197,15 +8117,13 @@ if(j.id==="docmaster"){
       status.innerHTML = `<b>세션</b> <span class="muted">시작:</span> ${started}`;
       const btnStart = el("button","btn small", s.startedAt && !s.endedAt ? "세션 진행중" : "세션 시작");
       btnStart.disabled = !!(s.startedAt && !s.endedAt);
-      btnStart.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btnStart.addEventListener("click", ()=>{
         startSessionIfNeeded();
         toast("세션이 시작되었습니다.");
         renderJobsAdmin(root);
       });
       const btnReset = el("button","btn danger small","직업 초기화");
-      btnReset.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btnReset.addEventListener("click", ()=>{
         if(!confirm("직업 배정과 수행 기록을 초기화합니다.\n되돌리기 없음. 진행할까요?")) return;
         endSession();
         localStorage.removeItem(JOB_KEYS.assign);
@@ -8223,8 +8141,7 @@ if(j.id==="docmaster"){
         renderJobsAdmin(root);
       });
       const btnChecklist = el("button","btn small","직업 체크리스트 관리");
-      btnChecklist.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btnChecklist.addEventListener("click", ()=>{
         openJobChecklistHub();
       });
       const btnPayJobReward = el("button","btn small","직업 보상 지급");
@@ -8247,8 +8164,7 @@ if(j.id==="docmaster"){
       guide.style.color = "#d9534f";
       guide.style.display = "none";
 
-      btnConfirm.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btnConfirm.addEventListener("click", ()=>{
         startSessionIfNeeded();
 
         // CONFIRM: sync holders -> students[].jobs (single source: sebit:students)
@@ -8356,8 +8272,7 @@ if(j.id==="docmaster"){
       const non = readJSON(JOB_KEYS.nonregular, []);
       const addNonBtn = el("button","btn small","＋ 비정규직 추가");
       addNonBtn.disabled = non.length>=5;
-      addNonBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      addNonBtn.addEventListener("click", ()=>{
         const name = prompt("비정규직 이름(활동 내용) 입력");
         if(!name) return;
         const lumen = Number(prompt("보상 루멘 입력", "50")||"50");
@@ -8379,14 +8294,12 @@ if(j.id==="docmaster"){
             <button class="chip small" data-act="edit">수정</button>
           </div>
         `;
-        row.querySelector('[data-act="toggle"]').addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        row.querySelector('[data-act="toggle"]').addEventListener("click", ()=>{
           nr.active = !nr.active;
           localStorage.setItem(JOB_KEYS.nonregular, JSON.stringify(non));
           renderMain();
         });
-        row.querySelector('[data-act="edit"]').addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        row.querySelector('[data-act="edit"]').addEventListener("click", ()=>{
           const name = prompt("이름(활동 내용) 수정", nr.name);
           if(!name) return;
           const lumen = Number(prompt("보상 루멘 수정", String(nr.lumen))||nr.lumen);
@@ -8407,8 +8320,7 @@ if(j.id==="docmaster"){
       const pt = ptAll[today] || [];
       const addPtBtn = el("button","btn small","＋ 알바 추가");
       addPtBtn.disabled = pt.length>=5;
-      addPtBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      addPtBtn.addEventListener("click", ()=>{
         const name = prompt("알바 이름 입력");
         if(!name) return;
         const lumen = Number(prompt("알바비(루멘) 입력", "30")||"30");
@@ -8433,8 +8345,7 @@ if(j.id==="docmaster"){
           </div>
         `;
         row.querySelector('[data-act="pick"]').addEventListener("click", ()=> openParttimePick(today, job));
-        row.querySelector('[data-act="pay"]').addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        row.querySelector('[data-act="pay"]').addEventListener("click", ()=> {
           if(job.paid) return;
           const names = roster.filter(s=> job.participants.includes(s.id)).map(s=> s.name).join(", ");
           if(!confirm(`지급 대상(${job.participants.length}명):\n${names || "(없음)"}\n\n지급할까요?`)) return;
@@ -8467,8 +8378,7 @@ if(j.id==="docmaster"){
         const on = job.participants.includes(s.id);
         item.classList.toggle("on", on);
         item.innerHTML = `<span class="pick-name">${(s.num? (s.num+" ") : "") + s.name}</span><span class="pick-state">${on? "선택됨":"선택"}</span>`;
-        item.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        item.addEventListener("click", ()=>{
           const idx = job.participants.indexOf(s.id);
           if(idx>=0) job.participants.splice(idx,1);
           else job.participants.push(s.id);
@@ -8519,8 +8429,7 @@ if(j.id==="docmaster"){
         </div>
       `;
       const btnSave = el("button","btn","설정 저장");
-      btnSave.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      btnSave.addEventListener("click", ()=>{
         const cap = Math.max(0, Number($("#jobCapInput")?.value||0));
         const lumen = Math.max(0, Number($("#jobLumenInput")?.value||0));
         const xp = Math.max(0, Number($("#jobXpInput")?.value||0));
@@ -8543,8 +8452,7 @@ if(j.id==="docmaster"){
         item.disabled = disabled;
         item.classList.toggle("on", on);
         item.innerHTML = `<span class="pick-name">${(s.num? (s.num+" ") : "") + s.name}</span><span class="pick-state">${on? "담당":"선택"}</span>`;
-        item.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        item.addEventListener("click", ()=>{
           const idx = cur.holders.indexOf(s.id);
           if(idx>=0){
             cur.holders.splice(idx,1);
@@ -8604,8 +8512,7 @@ if(j.id==="docmaster"){
           const t = el("button","role-tab", `역할 ${idx+1} · ${nm}`);
           t.type="button";
           t.classList.toggle("on", h===activeHolder);
-          t.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); activeHolder=h; render(); });
+          t.addEventListener("click", ()=> { activeHolder=h; render(); });
           tabs.appendChild(t);
         });
 
@@ -8617,8 +8524,7 @@ if(j.id==="docmaster"){
           item.type="button";
           if(locked) item.classList.add("locked");
           item.innerHTML = `<span class="pick-name">${(s.num? (s.num+" ") : "") + s.name}</span><span class="pick-state">${on? "배정됨": locked ? "다른 역할" : "선택"}</span>`;
-          item.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+          item.addEventListener("click", ()=>{
             if(locked) return;
             const arr = cur.targetsByHolder[activeHolder]||[];
             const i = arr.indexOf(s.id);
@@ -8632,8 +8538,7 @@ if(j.id==="docmaster"){
 
         const done = el("button","btn","배치 완료");
         done.disabled = !allAssigned();
-        done.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        done.addEventListener("click", ()=>{
           assign.jobs[job.id]=cur;
           saveJobAssign(assign);
           toast("배치 완료");
@@ -8645,8 +8550,7 @@ if(j.id==="docmaster"){
         const bulkBar = el("div","bulk-bar");
         const bulkBtn = el("button","chip","전체 선택");
         bulkBtn.type="button";
-        bulkBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        bulkBtn.addEventListener("click", ()=>{
           // selectable ids = not assigned to other roles
           const selectable = rosterIds.filter(sid=> !isAssignedElsewhere(sid, activeHolder));
           const curArr = cur.targetsByHolder[activeHolder]||[];
@@ -8917,8 +8821,7 @@ if(j.id==="docmaster"){
         btn.dataset.img = String(i);
         btn.title = `상품 이미지 ${i+1}`;
         btn.innerHTML = shopImgTag(i, "shop-imgpick-img", "상품 이미지");
-        btn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        btn.addEventListener("click", ()=>{
           selectedImg = i;
           root._shopSelectedImg = i;
           [...imgGrid.querySelectorAll(".shop-imgpick")].forEach(el=>el.classList.toggle("selected", el.dataset.img===String(i)));
@@ -8927,8 +8830,7 @@ if(j.id==="docmaster"){
       }
 
       // actions
-      root.querySelector("#shopAddBtn")?.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      root.querySelector("#shopAddBtn")?.addEventListener("click", ()=>{
         const name = (root.querySelector("#shopName")?.value || "").trim();
         const price = Number(root.querySelector("#shopPrice")?.value || 0);
         const stock = Number(root.querySelector("#shopStock")?.value || 0);
@@ -8958,13 +8860,11 @@ if(j.id==="docmaster"){
         render();
       });
 
-      root.querySelector("#shopCancelEditBtn")?.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      root.querySelector("#shopCancelEditBtn")?.addEventListener("click", ()=>{
         resetShopForm();
       });
 
-      root.querySelector("#shopPreviewBtn")?.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+      root.querySelector("#shopPreviewBtn")?.addEventListener("click", ()=>{
         openStudentShopPreviewModal();
       });
 
@@ -9104,8 +9004,7 @@ function renderPenaltyAdmin(root){
       btn.className = 'penalty-student-item' + (sid===selectedStudentId ? ' active' : '');
       const cnt = (byStudent.get(sid)||[]).length;
       btn.innerHTML = `<div class="name">${escapeHTML(getStudentLabel(sid))}</div><div class="count">${cnt}</div>`;
-      btn.addEventListener('click', (e) => {
-    if (e) e.stopPropagation();
+      btn.addEventListener('click', ()=>{
         selectedStudentId = sid;
         renderStudents();
         renderLogs();
@@ -9177,8 +9076,7 @@ function renderPenaltyAdmin(root){
   };
 
   // poster view (read-only inside modal)
-  root.querySelector('#penaltyPosterBtn')?.addEventListener('click', (e) => {
-    if (e) e.stopPropagation();
+  root.querySelector('#penaltyPosterBtn')?.addEventListener('click', ()=>{
     const modal = document.createElement('div');
     modal.className = 'penalty-poster-modal';
     const state = getConstitutionState();
@@ -10333,8 +10231,7 @@ function renderTeacherCalendar(){
         const all = readCalendarAll();
         const list = Array.isArray(all?.[key]) ? all[key] : [];
         if(list.length>0) b.classList.add("has-dot");
-        b.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+        b.addEventListener("click", ()=>{
           saveCalendarDraft(st.selected);
           st.editId = null;
           st.selected = key;
@@ -10386,8 +10283,7 @@ function renderCalendarListForSelected(){
     const del=document.createElement("button");
     del.className="btn danger small";
     del.textContent="삭제";
-    del.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+    del.addEventListener("click", ()=>{
       // capture undo
       session._calUndo = {dateKey: st.selected, ev: ev, ts: Date.now()};
       const all2 = readCalendarAll();
@@ -10629,8 +10525,7 @@ function wireCalendarUI(){
   const mealSave = $("#mealSaveBtn");
   const mealClear = $("#mealClearBtn");
 
-  if(prev) prev.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  if(prev) prev.addEventListener("click", ()=>{
     ensureCalendarState();
     saveCalendarDraft(session.calState.selected);
     session.calState.editId = null;
@@ -10640,8 +10535,7 @@ function wireCalendarUI(){
     renderTeacherCalendar();
   });
 
-  if(next) next.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  if(next) next.addEventListener("click", ()=>{
     ensureCalendarState();
     saveCalendarDraft(session.calState.selected);
     session.calState.editId = null;
@@ -10652,16 +10546,14 @@ function wireCalendarUI(){
   });
 
   if(addBtn) addBtn.addEventListener("click", addCalendarEventFromForm);
-  if(cancelBtn) cancelBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  if(cancelBtn) cancelBtn.addEventListener("click", ()=>{
     ensureCalendarState();
     setCalendarEdit(null);
     loadCalendarDraft(session.calState.selected);
     renderCalendarListForSelected();
   });
 
-  if(undoBtn) undoBtn.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  if(undoBtn) undoBtn.addEventListener("click", ()=>{
     const u = session._calUndo;
     if(!u || !u.dateKey || !u.ev) return;
     const all = readCalendarAll();
@@ -10939,10 +10831,8 @@ function wireTeacherStudentsUI(){
 
   const modeL = document.getElementById("studModeLumen");
   const modeX = document.getElementById("studModeXp");
-  if(modeL) modeL.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); studSetMode("lumen"); renderTeacherStudentsGrid(); });
-  if(modeX) modeX.addEventListener("click", (e) => {
-    if (e) e.stopPropagation(); studSetMode("xp"); renderTeacherStudentsGrid(); });
+  if(modeL) modeL.addEventListener("click", ()=>{ studSetMode("lumen"); renderTeacherStudentsGrid(); });
+  if(modeX) modeX.addEventListener("click", ()=>{ studSetMode("xp"); renderTeacherStudentsGrid(); });
 
   const topbar = document.getElementById("studAdminTopbar");
   if(topbar){
@@ -10968,8 +10858,7 @@ function wireTeacherStudentsUI(){
   if(selNone) selNone.addEventListener("click", studSelectNone);
 
   const give = document.getElementById("studGiveBtn");
-  if(give) give.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  if(give) give.addEventListener("click", ()=>{
     // if direct fields have value, prefer them, else no-op (user should press +/- buttons)
     if(_studAdminState.selected.size===0) return;
     const pv = Number((document.getElementById("studDirectPlus")?.value)||0);
@@ -10987,8 +10876,7 @@ function wireTeacherStudentsUI(){
   const confirm = document.getElementById("studBulkConfirmBtn");
   if(cancel) cancel.addEventListener("click", studCloseConfirm);
   if(cancelX) cancelX.addEventListener("click", studCloseConfirm);
-  if(confirm) confirm.addEventListener("click", (e) => {
-    if (e) e.stopPropagation();
+  if(confirm) confirm.addEventListener("click", ()=>{
     const d = _studAdminState.pendingDelta?.delta;
     if(Number.isFinite(d)) studApplyDelta(d);
     studCloseConfirm();
@@ -12209,54 +12097,3 @@ function closeStudentShopPreviewModal(){
 
   document.addEventListener("visibilitychange", function(){ if(!document.hidden) refreshIfShopPage("visible"); });
 })();
-
-
-// [v63 combined fix] 교사 활동기록 펼치기 상태 유지 보조 함수
-function __sebitKeepActivityExpanded(studentId) {
-  try {
-    if (!studentId) return;
-    window.__sebitOpenActivityStudentId = studentId;
-    setTimeout(() => {
-      const candidates = Array.from(document.querySelectorAll("button, .btn, [role='button']"));
-      const btn = candidates.find(el => {
-        const txt = (el.textContent || "").trim();
-        const row = el.closest("tr, .row, .card, .student-row, .activity-row");
-        const rowText = row ? row.textContent || "" : "";
-        return txt.includes("펼치기") && rowText.includes(studentId);
-      });
-      if (btn) btn.click();
-    }, 0);
-  } catch (err) {
-    console.warn("[SEBIT] activity expand keep failed", err);
-  }
-}
-
-
-
-// [v63 toggle fix]
-// 펼친 상태는 사용자가 다시 누를 때만 닫힘
-document.addEventListener("click", function(e){
-  const btn = e.target.closest("button");
-  if(!btn) return;
-
-  const txt = (btn.textContent || "").trim();
-  if(txt !== "펼치기" && txt !== "닫기") return;
-
-  e.stopPropagation();
-
-  const row = btn.closest("tr, .row, .card, .activity-row");
-  if(!row) return;
-
-  const detail = row.querySelector(".activity-detail, .detail, .expand-area");
-  if(!detail) return;
-
-  const opened = detail.style.display !== "none";
-
-  if(opened){
-    detail.style.display = "none";
-    btn.textContent = "펼치기";
-  } else {
-    detail.style.display = "";
-    btn.textContent = "닫기";
-  }
-}, true);
