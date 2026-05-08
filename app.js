@@ -1,97 +1,11 @@
 
-/* === SEBIT PATCH: realtime safe render guard ===
-   실시간 동기화는 유지하되, 사용자가 입력/클릭/모달 작업 중일 때
-   화면 전체 리렌더만 잠시 늦춰서 입력 지워짐·버튼 무반응·펼침 닫힘을 줄임.
-   index.html 수정 없음.
+/* === SEBIT PATCH: student shop purchase stable fix ===
+   - 학생 상점에서 구입 버튼 터치 중 Firestore 실시간 리렌더가 버튼 이벤트를 끊는 문제 방지
+   - index.html 수정 없음, app.js만 교체
 */
-window.__sebitSafeRenderHoldUntil = window.__sebitSafeRenderHoldUntil || 0;
-window.__sebitSafeRenderBusy = window.__sebitSafeRenderBusy || false;
-window.__sebitPendingRealtimeRefresh = window.__sebitPendingRealtimeRefresh || false;
-
-function sebitHoldRealtimeRender(ms){
-  window.__sebitSafeRenderHoldUntil = Math.max(
-    window.__sebitSafeRenderHoldUntil || 0,
-    Date.now() + (Number(ms) || 1500)
-  );
-}
-
-function sebitIsUserEditingNow(){
-  try{
-    const el = document.activeElement;
-    if(!el) return false;
-    const tag = String(el.tagName || "").toLowerCase();
-    if(tag === "input" || tag === "textarea" || tag === "select") return true;
-    if(el.isContentEditable) return true;
-  }catch(_){}
-  return false;
-}
-
-function sebitIsModalOpenNow(){
-  try{
-    return !!document.querySelector(".modal:not(.hidden), .drawer:not(.hidden), #adminModal:not(.hidden), .admin-modal:not(.hidden)");
-  }catch(_){ return false; }
-}
-
-function sebitIsSensitivePageNow(){
-  const page = String(document.body.getAttribute("data-page") || "");
-  // 학생 입력/상점/포켓/직업 화면, 교사 활동기록/학생관리 화면은 작업 중 리렌더에 취약
-  return page === "student-shop" ||
-         page === "student-pocket" ||
-         page === "student-home" ||
-         page === "student-jobstatus" ||
-         page === "teacher-activity" ||
-         page === "teacher-students";
-}
-
-function sebitShouldDelayRealtimeRender(){
-  if(window.__sebitSafeRenderBusy) return true;
-  if(Date.now() < (window.__sebitSafeRenderHoldUntil || 0)) return true;
-  if(sebitIsUserEditingNow()) return true;
-  if(sebitIsModalOpenNow()) return true;
-  return false;
-}
-
-function sebitRunRealtimeRefreshSafely(callback){
-  try{
-    if(typeof callback !== "function") return;
-    if(sebitIsSensitivePageNow() && sebitShouldDelayRealtimeRender()){
-      window.__sebitPendingRealtimeRefresh = true;
-      clearTimeout(window.__sebitPendingRealtimeRefreshTimer);
-      window.__sebitPendingRealtimeRefreshTimer = setTimeout(function(){
-        try{
-          if(sebitShouldDelayRealtimeRender()){
-            sebitRunRealtimeRefreshSafely(callback);
-            return;
-          }
-          window.__sebitPendingRealtimeRefresh = false;
-          callback();
-        }catch(err){ console.warn("[SEBIT PATCH] delayed refresh failed", err); }
-      }, 700);
-      return;
-    }
-    callback();
-  }catch(err){
-    console.warn("[SEBIT PATCH] safe refresh failed", err);
-  }
-}
-
-(function installSebitRealtimeInteractionGuard(){
-  if(window.__sebitRealtimeInteractionGuardInstalled) return;
-  window.__sebitRealtimeInteractionGuardInstalled = true;
-
-  ["keydown", "input", "compositionstart", "compositionupdate", "touchstart", "pointerdown", "mousedown", "click"].forEach(function(type){
-    document.addEventListener(type, function(e){
-      try{
-        const page = String(document.body.getAttribute("data-page") || "");
-        const target = e.target;
-        const editing = target && target.closest && target.closest("input, textarea, select, [contenteditable='true']");
-        const button = target && target.closest && target.closest("button, [role='button'], .btn, .chip, .menuBtn, .lightshop-tab");
-        if(editing) sebitHoldRealtimeRender(1800);
-        if(button && (page.startsWith("student-") || page.startsWith("teacher-"))) sebitHoldRealtimeRender(1400);
-      }catch(_){}
-    }, true);
-  });
-})();
+window.__sebitStudentShopPurchaseBusy = false;
+window.__sebitStudentShopLastRenderAt = 0;
+window.__sebitStudentShopRenderHoldUntil = 0;
 
 // Firebase 연결은 index.html의 compat script에서 처리함 (iPad Safari 호환)
 // 기존 modular 코드 형태를 유지하기 위한 compat 래퍼
@@ -402,7 +316,6 @@ let __sebitUnsubStudents = null;
 let __sebitUnsubPenaltyLogs = null;
 
 function refreshCurrentSebitPageFromRealtime(){
-  sebitRunRealtimeRefreshSafely(function(){
   try{
     const page = String(document.body.getAttribute("data-page") || "");
     if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
@@ -412,12 +325,14 @@ function refreshCurrentSebitPageFromRealtime(){
     if(page === "student-dashboard" && typeof renderStudentDashboard === "function") renderStudentDashboard();
     if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
     if(page === "student-shop" && typeof renderStudentShop === "function") {
-      if(window.__sebitStudentShopPurchaseBusy || sebitShouldDelayRealtimeRender()) return;
+      // [shop stable fix] 학생이 구입 버튼을 누르는 순간에는 화면 전체 리렌더를 막음
+      if(window.__sebitStudentShopPurchaseBusy || Date.now() < (window.__sebitStudentShopRenderHoldUntil || 0)) {
+        return;
+      }
       renderStudentShop();
     }
     if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
   }catch(err){ console.warn("[SEBIT] realtime refresh skipped", err); }
-  });
 }
 
 function startFirestoreRealtimeSync(){
@@ -569,19 +484,14 @@ async function loadShopStateFromFirestore(){
   finally{ __sebitShopLoadingFromFirestore = false; }
 }
 function refreshShopPagesFromRealtime(){
-  sebitRunRealtimeRefreshSafely(function(){
   try{
     const page = String(document.body.getAttribute("data-page") || "");
-    if(page === "student-shop" && typeof renderStudentShop === "function") {
-      if(window.__sebitStudentShopPurchaseBusy || sebitShouldDelayRealtimeRender()) return;
-      renderStudentShop();
-    }
+    if(page === "student-shop" && typeof renderStudentShop === "function") renderStudentShop();
     if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
     if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
     if(typeof renderLightMerchantRequests === "function") renderLightMerchantRequests();
     if(typeof renderShopAdmin === "function") renderShopAdmin();
   }catch(err){ console.warn("[SEBIT] shop realtime refresh skipped", err); }
-  });
 }
 function startShopFirestoreRealtimeSync(){
   if(__sebitShopRealtimeStarted) return;
@@ -739,7 +649,6 @@ async function loadJobStateFromFirestore(){
   finally{ __sebitJobLoadingFromFirestore = false; }
 }
 function refreshJobPagesFromRealtime(){
-  sebitRunRealtimeRefreshSafely(function(){
   try{
     const page = String(document.body.getAttribute("data-page") || "");
     if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
@@ -749,7 +658,6 @@ function refreshJobPagesFromRealtime(){
     if(String(location.hash || "") === "#admin-jobs" && typeof openAdminModal === "function") openAdminModal({ key:"jobs", title:"직업 관리" });
     if(String(location.hash || "") === "#admin-job-status" && typeof openAdminModal === "function") openAdminModal({ key:"job-status", title:"직업 수행 현황 관리" });
   }catch(err){ console.warn("[SEBIT] job realtime refresh skipped", err); }
-  });
 }
 function startJobFirestoreRealtimeSync(){
   if(__sebitJobRealtimeStarted) return;
@@ -1941,6 +1849,7 @@ function getEffectivePrice(p, deal){
 }
 
 function renderStudentShop(){
+  window.__sebitStudentShopLastRenderAt = Date.now();
   const me = getMe();
   if(!me) return showPage("student-login");
 
@@ -11981,11 +11890,16 @@ function closeStudentShopPreviewModal(){
   };
 
   window.sebitFinalRefreshShopScreens = function(){
-    sebitRunRealtimeRefreshSafely(function(){
     try{
       const page = String(document.body.getAttribute("data-page") || "");
       if(page === "student-shop" && typeof renderStudentShop === "function") {
-        try{ window.sebitFinalLoadShopProductsDocNow && window.sebitFinalLoadShopProductsDocNow().then(function(){ renderStudentShop(); }); }catch(_){ renderStudentShop(); }
+        // [shop stable fix] 구매/터치 중에는 학생 상점 전체 리렌더 금지
+        if(window.__sebitStudentShopPurchaseBusy || Date.now() < (window.__sebitStudentShopRenderHoldUntil || 0)) {
+          return;
+        }
+        try{ window.sebitFinalLoadShopProductsDocNow && window.sebitFinalLoadShopProductsDocNow().then(function(){
+          if(!window.__sebitStudentShopPurchaseBusy && Date.now() >= (window.__sebitStudentShopRenderHoldUntil || 0)) renderStudentShop();
+        }); }catch(_){ renderStudentShop(); }
         renderStudentShop();
       }
       if(page === "student-pocket" && typeof renderStudentPocket === "function") renderStudentPocket();
@@ -11995,11 +11909,9 @@ function closeStudentShopPreviewModal(){
         openAdminModal({ key:"shop", title:"상점 관리" });
       }
     }catch(err){ console.warn("[SEBIT FINAL] shop refresh skipped", err); }
-    });
   };
 
   window.sebitFinalRefreshJobScreens = function(){
-    sebitRunRealtimeRefreshSafely(function(){
     try{
       const page = String(document.body.getAttribute("data-page") || "");
       if(typeof renderStudentShell === "function" && page.startsWith("student-")) renderStudentShell();
@@ -12009,7 +11921,6 @@ function closeStudentShopPreviewModal(){
       if(String(location.hash || "") === "#admin-jobs" && typeof openAdminModal === "function") openAdminModal({ key:"jobs", title:"직업 관리" });
       if(String(location.hash || "") === "#admin-job-status" && typeof openAdminModal === "function") openAdminModal({ key:"job-status", title:"직업 수행현황 관리" });
     }catch(err){ console.warn("[SEBIT FINAL] job refresh skipped", err); }
-    });
   };
 
   window.sebitFinalIsJobKey = function(key){
@@ -12210,30 +12121,56 @@ function closeStudentShopPreviewModal(){
 })();
 
 
-/* === SEBIT PATCH: student shop purchase touch hold === */
-(function installSebitStudentShopPurchaseHold(){
-  if(window.__sebitStudentShopPurchaseHoldInstalled) return;
-  window.__sebitStudentShopPurchaseHoldInstalled = true;
-  window.__sebitStudentShopPurchaseBusy = window.__sebitStudentShopPurchaseBusy || false;
+/* === SEBIT PATCH: student shop event delegation stability === */
+(function installSebitStudentShopStableTouchGuard(){
+  if(window.__sebitStudentShopStableTouchGuardInstalled) return;
+  window.__sebitStudentShopStableTouchGuardInstalled = true;
 
-  function isShopBuyButton(target){
-    try{
-      const page = String(document.body.getAttribute("data-page") || "");
-      if(page !== "student-shop") return false;
-      const btn = target.closest ? target.closest("button") : null;
-      const grid = document.getElementById("studentShopGrid");
-      if(!btn || !grid || !grid.contains(btn)) return false;
-      const txt = (btn.textContent || "").trim();
-      return txt.includes("구입") || txt.includes("구매") || txt.includes("신청");
-    }catch(_){ return false; }
+  function isStudentShopPurchaseButton(el){
+    if(!el) return false;
+    const btn = el.closest ? el.closest("button") : null;
+    if(!btn) return false;
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page !== "student-shop") return false;
+    const grid = document.getElementById("studentShopGrid");
+    if(!grid || !grid.contains(btn)) return false;
+    const txt = (btn.textContent || "").trim();
+    return txt.includes("구입") || txt.includes("구매") || txt.includes("신청");
   }
 
+  function holdShopRender(){
+    window.__sebitStudentShopRenderHoldUntil = Date.now() + 1800;
+  }
+
+  document.addEventListener("touchstart", function(e){
+    if(isStudentShopPurchaseButton(e.target)) holdShopRender();
+  }, true);
+
+  document.addEventListener("pointerdown", function(e){
+    if(isStudentShopPurchaseButton(e.target)) holdShopRender();
+  }, true);
+
+  document.addEventListener("mousedown", function(e){
+    if(isStudentShopPurchaseButton(e.target)) holdShopRender();
+  }, true);
+
   document.addEventListener("click", function(e){
-    if(!isShopBuyButton(e.target)) return;
+    if(!isStudentShopPurchaseButton(e.target)) return;
+    holdShopRender();
+
     window.__sebitStudentShopPurchaseBusy = true;
-    sebitHoldRealtimeRender(2200);
     setTimeout(function(){
       window.__sebitStudentShopPurchaseBusy = false;
-    }, 2200);
+      window.__sebitStudentShopRenderHoldUntil = 0;
+
+      try{
+        const me = (typeof getMe === "function") ? getMe() : null;
+        if(me){
+          const lumenEl = document.getElementById("studentShopLumen");
+          if(lumenEl) lumenEl.textContent = String(Number(me.lumen)||0);
+        }
+        if(typeof updateStudentShopBottomInfo === "function") updateStudentShopBottomInfo();
+      }catch(_){}
+    }, 1800);
   }, true);
 })();
