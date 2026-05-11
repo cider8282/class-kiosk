@@ -1759,12 +1759,8 @@ function renderStudentPocket(){
     const btn = wrap.querySelector("button");
     if(btn && !requesting){
       btn.addEventListener("click", ()=>{
-        // 선착순 제한 없음(하루) 초과 시: 신청 불가 안내(라이트 포켓에서)
-        if(shopIsClosed()){
-          toast("오늘 상품 지급 신청이 마감되었어요.");
-          return;
-        }
-        // 요청 생성(빛의 상인 체크리스트 연동)
+        // 선착순 30건(하루) 초과 시: 신청 불가 안내(라이트 포켓에서)
+// 요청 생성(빛의 상인 체크리스트 연동)
         const req = {
           id: "lm_"+Date.now()+"_"+Math.random().toString(16).slice(2),
           ts: Date.now(),
@@ -1826,7 +1822,9 @@ function shopIncTodayCount(){
   obj[key] = Math.max(0, Number(obj?.[key]||0)) + 1;
   writeJSON(LS.shopDailyCounter, obj);
 }
-function shopIsClosed(){ return false; }
+function shopIsClosed(){
+  return false;
+}
 
 // === Light Merchant Requests (v1) ===
 function lmTodayKey(){ return shopTodayKey(); }
@@ -1919,7 +1917,7 @@ function renderStudentShop(){
   const dailyEl = document.getElementById("studentShopDailyCount");
   if(dailyEl){
     const c = shopGetTodayCount();
-    dailyEl.textContent = `제한 없음`;
+    dailyEl.textContent = `${Math.min(c,30)}/30`;
   }
 
 
@@ -1989,8 +1987,8 @@ const cards = filtered.map(p=>{
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
     const closed = shopIsClosed();
-    const state = closed ? "마감" : (isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중"));
-    const disabled = (isSoldOut || isStopped || closed);
+    const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
+    const disabled = (isSoldOut || isStopped);
 
 
     const wrap = document.createElement("div");
@@ -2043,13 +2041,7 @@ function openPurchaseConfirm(productId){
 
   const items = getMyPocketItems(me.id);
   const total = pocketTotalCount(items);
-
-  if(shopIsClosed()){
-    toast("오늘 상품 지급 신청이 마감되었어요.");
-    return;
-  }
-
-  if(isStopped){ toast("판매중단 상품입니다"); return; }
+if(isStopped){ toast("판매중단 상품입니다"); return; }
   if(stock <= 0){ toast("품절 상품입니다"); return; }
   if(Math.max(0, Number(me.lumen||0)) < price){ toast("루멘이 부족해요"); return; }
   if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
@@ -2136,13 +2128,7 @@ function shopTryPurchase(productId){
   const items = getMyPocketItems(me.id);
   const total = pocketTotalCount(items);
   if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
-
-  if(shopIsClosed()){
-    toast("오늘 상품 지급 신청이 마감되었어요.");
-    return;
-  }
-
-  // 1) 학생 루멘 차감
+// 1) 학생 루멘 차감
   const students = readJSON(LS.students, []);
   const sidx = students.findIndex(s=>s.id === me.id);
   if(sidx >= 0){
@@ -2181,7 +2167,7 @@ setMyPocketItems(me.id, items);
   while(logs.length > 50) logs.shift();
   writeJSON(LS.shopPurchaseLog, logs);
 
-  // 지급요청(선착순 제한 없음) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
+  // 지급요청(선착순 30건) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
   toast("구매 완료!");
   // UI 갱신
   renderStudentShop();
@@ -2325,8 +2311,7 @@ function todayKey() {
 }
 
 function kstHour() {
-  // 자동 17시 입력 제한 해제: 항상 입력 가능 시간으로 처리
-  return 0;
+  return kstNow().getUTCHours();
 }
 
 function parseYMD(s) {
@@ -2545,12 +2530,12 @@ function renderTeacherHome() {
 function renderInputWindowBanner() {
   const el = $("#studentInputWindowMsg");
   if (!el) return;
-  if (kstHour() >= 17) {
+  if (false) {
     el.classList.add("is-closed");
-    el.textContent = "입력 시간 제한이 해제되어 있습니다.";
+    el.textContent = "17:00 이후에는 입력할 수 없습니다.";
   } else {
     el.classList.remove("is-closed");
-    el.textContent = "입력 가능 상태입니다. (자동 시간 제한 해제)";
+    el.textContent = "입력 가능 시간입니다. (00:00~17:00)";
   }
 }
 function renderThermometer() {
@@ -2952,7 +2937,7 @@ function renderStudentHomeV1(){
   if (msg) {
     if (locked) {
       msg.style.display = 'block';
-      msg.textContent = '입력 시간 제한이 해제되어 있습니다.';
+      msg.textContent = '17:00 이후에는 입력할 수 없습니다.';
     } else {
       msg.style.display = 'none';
       msg.textContent = '';
@@ -3003,7 +2988,7 @@ function renderStudentHomeV1(){
 
 function setMorning(flag){
   const msg = $("#morningStateMsg");
-  if (kstHour() >= 17) { toast("입력 시간 제한이 해제되어 있습니다."); return; }
+  if (false) { return; }
   const today = todayKey();
   const d = ensureTodayActivityRecord(session.studentId);
   d[today][session.studentId].morning = !!flag;
@@ -3111,7 +3096,7 @@ function applyReadingSelection(){
 }
 
 function commitReadingEntry(){
-  if (kstHour() >= 17) { toast("입력 시간 제한이 해제되어 있습니다."); return; }
+  if (false) { return; }
   ensureTodayActivityRecord(session.studentId);
   const today = todayKey();
   const daily = getDailyActivity();
@@ -3413,7 +3398,7 @@ function renderStudentActivity(){
   }
 
   const hint = $("#studentReadingSavedHint");
-  if (hint && locked) hint.textContent = "입력 가능";
+  if (hint && locked) hint.textContent = "17:00 이후 입력 잠금";
 }
 
 
@@ -4421,12 +4406,8 @@ function bind() {
     const qid = btn.getAttribute("data-qopen");
     openQuestDetailModal(qid);
   });
+  // Menu buttons: data-go handler above handles connected student pages.
 
-
-  // Menu buttons
-  document.querySelectorAll('.student-v1-menu .menuBtn')?.forEach(btn=>{
-    btn.addEventListener('click', ()=> toast('해당 페이지는 다음 단계에서 연결합니다.'));
-  });
   $("#closePinResetModalBtn")?.addEventListener("click", closePinResetModal);
   $("#savePinResetBtn")?.addEventListener("click", savePinReset);
   $("#pinResetModal")?.addEventListener("click", (e)=>{ if (e.target.id==="pinResetModal") closePinResetModal(); });
@@ -5805,7 +5786,7 @@ if(j.id==="timekeeper"){
   panel.appendChild(el("div","weather-sec-h","등교 시각 기록"));
 
   if(lock){
-    panel.appendChild(el("div","ranger-lock-banner","자동 시간 제한 해제 · 오늘 기록 가능"));
+    panel.appendChild(el("div","ranger-lock-banner","17시 이후 잠김 · 오늘 기록은 내일 다시 진행해요."));
   }
 
   const tableWrap = el("div","timekeeper-table-wrap");
@@ -5885,7 +5866,7 @@ if(j.id==="timekeeper"){
   const renderFoot = ()=>{
     if(lock){
       lockBadge.classList.remove("hidden");
-      msg.textContent = "입력 가능";
+      msg.textContent = "⏱️ 17시 이후 잠김";
       btnClose.disabled = true;
       btnOpen.disabled = true;
       return;
@@ -5947,7 +5928,7 @@ if(j.id==="timekeeper"){
     const lock = isAfter1700();
     let lockBanner = null;
     if(lock){
-      lockBanner = el("div","ranger-lock-banner","자동 시간 제한 해제");
+      lockBanner = el("div","ranger-lock-banner","17시 이후 잠김 · 벌점 부과/취소는 내일 0시 전까지만 가능 (이후 취소는 메뉴 2에서)");
     }
 
     // unified header/card (match other checklists)
@@ -6264,7 +6245,7 @@ if(j.id==="timekeeper"){
     panel.appendChild(tableWrap);
 
     const note = el("div","weather-note");
-    note.textContent = "지급 요청 자동 제한 없음 제한을 해제했어요.";
+    note.textContent = "오늘까지 최대 30건까지 지급 요청이 생성돼요.";
     panel.appendChild(note);
 
     card.appendChild(panel);
@@ -6279,7 +6260,7 @@ if(j.id==="timekeeper"){
 
     const rerender = ()=>{
       const closed = lmIsClosed();
-      cnt.textContent = `오늘 신청 ${shopGetTodayCount()}건`;
+      cnt.textContent = `오늘 신청 ${Math.min(shopGetTodayCount(),30)}/30`;
       lockBadge.classList.toggle("hidden", !closed);
       card.classList.toggle("locked", !!closed);
 
@@ -7040,7 +7021,7 @@ if(j.id==="timekeeper"){
   panel.appendChild(el("div","weather-sec-h","등교 시각 기록"));
 
   if(lock){
-    panel.appendChild(el("div","ranger-lock-banner","자동 시간 제한 해제 · 오늘 기록 가능"));
+    panel.appendChild(el("div","ranger-lock-banner","17시 이후 잠김 · 오늘 기록은 내일 다시 진행해요."));
   }
 
   const tableWrap = el("div","timekeeper-table-wrap");
@@ -7120,7 +7101,7 @@ if(j.id==="timekeeper"){
   const renderFoot = ()=>{
     if(lock){
       lockBadge.classList.remove("hidden");
-      msg.textContent = "입력 가능";
+      msg.textContent = "⏱️ 17시 이후 잠김";
       btnClose.disabled = true;
       btnOpen.disabled = true;
       return;
@@ -7216,7 +7197,7 @@ if(j.id==="timekeeper"){
     panel.appendChild(tableWrap);
 
     const note = el("div","weather-note");
-    note.textContent = "지급 요청 자동 제한 없음 제한을 해제했어요.";
+    note.textContent = "오늘까지 최대 30건까지 지급 요청이 생성돼요.";
     panel.appendChild(note);
 
     card.appendChild(panel);
@@ -7231,7 +7212,7 @@ if(j.id==="timekeeper"){
 
     const rerender = ()=>{
       const closed = lmIsClosed();
-      cnt.textContent = `오늘 신청 ${shopGetTodayCount()}건`;
+      cnt.textContent = `오늘 신청 ${Math.min(shopGetTodayCount(),30)}/30`;
       lockBadge.classList.toggle("hidden", !closed);
       card.classList.toggle("locked", !!closed);
 
@@ -12198,19 +12179,3 @@ function closeStudentShopPreviewModal(){
     }, 2200);
   }, true);
 })();
-
-
-/* === SEBIT no manual student lock final === */
-function sebitDisableManualStudentLockUI(){
-  try{
-    document.querySelectorAll("button").forEach(btn=>{
-      const t = (btn.textContent || "").trim();
-      if(t.includes("학생 입력 잠금") || t.includes("학생 입력 항상 열림")){
-        btn.style.display = "none";
-        btn.disabled = true;
-      }
-    });
-  }catch(e){}
-}
-document.addEventListener("DOMContentLoaded", sebitDisableManualStudentLockUI);
-setInterval(sebitDisableManualStudentLockUI, 1500);
