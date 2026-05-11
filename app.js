@@ -1,19 +1,55 @@
 
-/* === SEBIT PATCH: Firebase compat helper + teacher auth cloud standard === */
-(function(){
-  try{
-    if(typeof window.collection !== "function") window.collection = function(dbObj, name){ return dbObj.collection(name); };
-    if(typeof window.doc !== "function") window.doc = function(dbObj, col, id){ return dbObj.collection(col).doc(id); };
-    if(typeof window.getDocs !== "function") window.getDocs = async function(ref){ return await ref.get(); };
-    if(typeof window.onSnapshot !== "function") window.onSnapshot = function(ref, ok, fail){ return ref.onSnapshot(ok, fail); };
-    if(typeof window.setDoc !== "function") window.setDoc = async function(ref, data, opt){ return await ref.set(data, opt || {merge:false}); };
-    if(typeof window.getDoc !== "function") window.getDoc = async function(ref){ return await ref.get(); };
-  }catch(e){ console.error("[SEBIT] Firebase helper install failed", e); }
-})();
+/* === SEBIT PATCH: login-safe realtime render guard removed ===
+   로그인/입력 화면을 다시 그리는 지연 감시를 제거함.
+   기존 호출부 호환을 위해 함수명만 가벼운 no-op으로 유지함.
+*/
+function sebitHoldRealtimeRender(ms){}
+function sebitIsUserEditingNow(){ return false; }
+function sebitIsModalOpenNow(){ return false; }
+function sebitIsSensitivePageNow(){ return false; }
+function sebitShouldDelayRealtimeRender(){ return false; }
+function sebitRunRealtimeRefreshSafely(callback){
+  try{ if(typeof callback === "function") callback(); }catch(err){ console.warn("[SEBIT] realtime refresh failed", err); }
+}
 
-// LOGIN FAST MODE PATCH
+// Firebase 연결은 index.html의 compat script에서 처리함 (iPad Safari 호환)
+// 기존 modular 코드 형태를 유지하기 위한 compat 래퍼
+function sebitEnsureDbReady(){
+  if (typeof db === "undefined" || !db || typeof db.collection !== "function") {
+    const err = window.__sebitFirebaseError || new Error("Firestore db is not ready");
+    console.error("[SEBIT] Firestore is not connected. Check Firebase script/config in index.html.", err);
+    throw err;
+  }
+  return db;
+}
+function collection(dbObj, collectionName){
+  dbObj = dbObj || sebitEnsureDbReady();
+  return dbObj.collection(collectionName);
+}
+function doc(dbObj, collectionName, docId){
+  dbObj = dbObj || sebitEnsureDbReady();
+  return dbObj.collection(collectionName).doc(docId);
+}
+async function getDocs(collectionRef){
+  const snap = await collectionRef.get();
+  return {
+    docs: snap.docs,
+    forEach: (callback) => snap.forEach(callback)
+  };
+}
+function writeBatch(dbObj){
+  dbObj = dbObj || sebitEnsureDbReady();
+  const batch = dbObj.batch();
+  return {
+    set: (ref, data, options) => batch.set(ref, data, options),
+    delete: (ref) => batch.delete(ref),
+    commit: () => batch.commit()
+  };
+}
+function onSnapshot(ref, next, error){
+  return ref.onSnapshot(next, error);
+}
 
-/* === 
 /* === Firestore sync: constitution / law + penalty values (final) ===
    - 기준 데이터: sharedState/constitution.value
    - 교사 메뉴 세빛 헌법 저장값을 서버에 올림
@@ -1371,11 +1407,11 @@ const DEFAULT_TEACHER_PW = "sebit2026"; // 영어+숫자 (교사 설정에서 �
 const DEFAULT_PIN = "1234";
 
 
-/* === SEBIT Teacher Auth: Firestore-first cloud standard ===
-   - 교사용 비밀번호는 Firestore sharedState/teacherAuth 가 기준
-   - localStorage에는 실제 비밀번호를 저장하지 않음
-   - 기존 기기에 남은 localStorage 비밀번호가 서버값을 덮어쓰지 않음
-   - 서버값을 1회 읽은 뒤 캐시 hash만 보관하여 로그인 지연을 줄임
+/* === SEBIT Teacher Auth: Firestore cloud-first clean version ===
+   - 교사용 비밀번호는 Firestore sharedState/teacherAuth 문서 기준
+   - 실제 비밀번호는 localStorage에 저장하지 않음
+   - localStorage는 마지막으로 받은 passwordHash 캐시만 보관하여 로그인 속도 보조
+   - Firestore 실시간 리스너가 교사 비밀번호 변경을 모든 기기에 반영
 */
 const SEBIT_TEACHER_AUTH_DOC = "teacherAuth";
 const SEBIT_TEACHER_AUTH_CACHE_KEY = "sebit:teacherAuthCacheHash";
@@ -1390,10 +1426,10 @@ function sebitSimpleHash(s){
   return String(h1 >>> 0);
 }
 function sebitTeacherAuthRef(){
-  if(window.firebase && firebase.firestore) return firebase.firestore().collection("sharedState").doc(SEBIT_TEACHER_AUTH_DOC);
-  if(window.db && typeof window.db.collection === "function") return window.db.collection("sharedState").doc(SEBIT_TEACHER_AUTH_DOC);
-  if(typeof doc === "function" && typeof db !== "undefined") return doc(db, "sharedState", SEBIT_TEACHER_AUTH_DOC);
-  throw new Error("Firestore not ready");
+  if (typeof db !== "undefined" && db && typeof db.collection === "function") {
+    return db.collection("sharedState").doc(SEBIT_TEACHER_AUTH_DOC);
+  }
+  return doc(db, "sharedState", SEBIT_TEACHER_AUTH_DOC);
 }
 function sebitNormalizeTeacherAuth(data){
   const d = (data && typeof data === "object") ? data : {};
@@ -1410,10 +1446,19 @@ function sebitApplyTeacherAuthCache(auth){
   if(normalized.masterCodeHash){
     try{ localStorage.setItem(LS.masterCodeHash, normalized.masterCodeHash); }catch(_){ }
   }
+  try{ localStorage.removeItem(LS.teacherPw); }catch(_){ }
   return __sebitTeacherAuthCache || normalized;
 }
-async function loadTeacherAuthFromFirestore(){
+function sebitCachedTeacherAuth(){
   if(__sebitTeacherAuthCache?.passwordHash) return __sebitTeacherAuthCache;
+  const cachedHash = String(localStorage.getItem(SEBIT_TEACHER_AUTH_CACHE_KEY) || "");
+  if(cachedHash){
+    __sebitTeacherAuthCache = { passwordHash: cachedHash, masterCodeHash: String(localStorage.getItem(LS.masterCodeHash) || ""), updatedAt: 0 };
+    return __sebitTeacherAuthCache;
+  }
+  return null;
+}
+async function loadTeacherAuthFromFirestore(){
   if(__sebitTeacherAuthLoading) return __sebitTeacherAuthLoading;
   __sebitTeacherAuthLoading = (async()=>{
     try{
@@ -1421,24 +1466,17 @@ async function loadTeacherAuthFromFirestore(){
       const snap = await ref.get();
       const exists = (typeof snap.exists === "function") ? snap.exists() : !!snap.exists;
       if(exists){
-        const auth = sebitApplyTeacherAuthCache(snap.data() || {});
-        console.log("[SEBIT] teacher auth loaded from Firestore");
-        return auth;
+        return sebitApplyTeacherAuthCache(snap.data() || {});
       }
-      // 서버 문서가 없을 때만 기본값으로 생성. 기존 localStorage 비밀번호로 서버를 덮어쓰지 않음.
+      // 서버 문서가 없을 때만 기본값으로 생성. 기기 localStorage 값이 서버를 덮어쓰지 않음.
       const auth = { passwordHash: sebitSimpleHash(DEFAULT_TEACHER_PW), masterCodeHash: String(localStorage.getItem(LS.masterCodeHash) || ""), updatedAt: Date.now() };
       await ref.set({ key: SEBIT_TEACHER_AUTH_DOC, ...auth }, { merge:false });
       return sebitApplyTeacherAuthCache(auth);
     }catch(err){
       console.error("[SEBIT] teacher auth cloud load failed", err);
-      const cachedHash = String(localStorage.getItem(SEBIT_TEACHER_AUTH_CACHE_KEY) || "");
-      if(cachedHash){
-        __sebitTeacherAuthCache = { passwordHash: cachedHash, masterCodeHash: String(localStorage.getItem(LS.masterCodeHash) || ""), updatedAt:0 };
-        return __sebitTeacherAuthCache;
-      }
-      // 서버 연결이 한 번도 안 된 기기에서만 기본값 fallback
-      __sebitTeacherAuthCache = { passwordHash: sebitSimpleHash(DEFAULT_TEACHER_PW), masterCodeHash: String(localStorage.getItem(LS.masterCodeHash) || ""), updatedAt:0 };
-      return __sebitTeacherAuthCache;
+      const cached = sebitCachedTeacherAuth();
+      if(cached) return cached;
+      return { passwordHash: sebitSimpleHash(DEFAULT_TEACHER_PW), masterCodeHash: String(localStorage.getItem(LS.masterCodeHash) || ""), updatedAt:0 };
     }finally{
       __sebitTeacherAuthLoading = null;
     }
@@ -1458,7 +1496,7 @@ function startTeacherAuthRealtimeListener(){
   }catch(err){ console.error("[SEBIT] teacher auth listener install failed", err); }
 }
 async function saveTeacherAuthToFirestore({ password, masterCodeHash } = {}){
-  const current = await loadTeacherAuthFromFirestore().catch(()=>__sebitTeacherAuthCache || {});
+  const current = await loadTeacherAuthFromFirestore().catch(()=>sebitCachedTeacherAuth() || {});
   const next = {
     passwordHash: password ? sebitSimpleHash(password) : String(current?.passwordHash || sebitSimpleHash(DEFAULT_TEACHER_PW)),
     masterCodeHash: (masterCodeHash !== undefined) ? String(masterCodeHash || "") : String(current?.masterCodeHash || localStorage.getItem(LS.masterCodeHash) || ""),
@@ -1467,9 +1505,6 @@ async function saveTeacherAuthToFirestore({ password, masterCodeHash } = {}){
   const ref = sebitTeacherAuthRef();
   await ref.set({ key: SEBIT_TEACHER_AUTH_DOC, ...next }, { merge:false });
   sebitApplyTeacherAuthCache(next);
-  // 실제 비밀번호는 기기 localStorage에 저장하지 않음
-  try{ localStorage.removeItem(LS.teacherPw); }catch(_){ }
-  console.log("[SEBIT] teacher auth saved to Firestore");
   return next;
 }
 async function checkTeacherPassword(raw){
@@ -2159,7 +2194,8 @@ function pushSystemLog(line) {
   // default: no background image
 
 function ensureSeed() {
-  try{ localStorage.removeItem(LS.teacherPw); }catch(_){ }
+  const pw = localStorage.getItem(LS.teacherPw);
+  if (!pw) localStorage.setItem(LS.teacherPw, DEFAULT_TEACHER_PW);
 
   const students = readJSON(LS.students, null);
   if (!students || !Array.isArray(students)) {
@@ -3832,6 +3868,7 @@ async function handleViewMyPenaltyLogsClick(){
 (function bindStudentPenaltyLogAlwaysButton(){
   if(window.__sebitPenaltyLogButtonBound) return;
   window.__sebitPenaltyLogButtonBound = true;
+  document.addEventListener("click", (e)=>{
     const btn = e.target && e.target.closest ? e.target.closest("#viewMyPenaltyLogsBtn") : null;
     if(!btn) return;
     e.preventDefault();
@@ -4252,6 +4289,7 @@ function bindStudentQuickReadonlyButtons(){
 
 function bind() {
   bindStudentQuickReadonlyButtons();
+  document.addEventListener("click", (e) => {
     const g = e.target.closest("[data-thermo-grant]");
     if (g) { setThermoClaim(g.getAttribute("data-thermo-grant"), true); return; }
     const c = e.target.closest("[data-thermo-cancel]");
@@ -10093,6 +10131,7 @@ const openAdminModal = ({ title, key } = {}) => {
   });
 
   // click outside closes menu
+document.addEventListener("click", (e)=> {
     if (!menuDropdown || menuDropdown.classList.contains("hidden")) return;
     const within = e.target.closest("#menuDropdown") || e.target.closest("#menuManageBtn");
     if (!within) hideMenu();
@@ -10433,6 +10472,7 @@ function sebitStopRealtimeListeners(reason="idle"){
 function sebitStartRealtimeListeners(){
   if(document.hidden) return;
   window.__sebitRealtimePaused = false;
+  try{ startTeacherAuthRealtimeListener(); }catch(err){ console.warn("[SEBIT GUARD] teacher auth realtime start skipped", err); }
   try{ startFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] student/penalty realtime start skipped", err); }
   try{ startShopFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] shop realtime start skipped", err); }
   try{ startJobFirestoreRealtimeSync(); }catch(err){ console.warn("[SEBIT GUARD] job realtime start skipped", err); }
@@ -10521,7 +10561,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (page === "teacher-students" && typeof renderTeacherStudents === "function") renderTeacherStudents();
       if (page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
       sebitStartRealtimeListeners();
-      try{ startTeacherAuthRealtimeListener(); }catch(_){ }
       installSebitRealtimeCostGuard();
     } catch (_) {}
   });
@@ -11797,6 +11836,7 @@ function closeStudentShopPreviewModal(){
   }, true);
 
   // 학생용 하단 퀵버튼: HTML onclick이 없어도 텍스트 기준으로 연결
+  document.addEventListener("click", function(e){
     const btn = e.target && e.target.closest ? e.target.closest("button, .btn, [role='button'], a") : null;
     if(!btn) return;
     const text = String(btn.textContent || "").replace(/\s+/g, " ").trim();
@@ -12109,6 +12149,7 @@ function closeStudentShopPreviewModal(){
     }, 700);
   });
 
+  document.addEventListener("click", function(e){
     const btn = e.target && e.target.closest ? e.target.closest("[data-go]") : null;
     if(btn && btn.getAttribute("data-go") === "student-shop"){
       setTimeout(function(){
@@ -12141,6 +12182,7 @@ function closeStudentShopPreviewModal(){
     }catch(_){ return false; }
   }
 
+  document.addEventListener("click", function(e){
     if(!isShopBuyButton(e.target)) return;
     window.__sebitStudentShopPurchaseBusy = true;
     sebitHoldRealtimeRender(2200);
