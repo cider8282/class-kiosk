@@ -1566,6 +1566,43 @@ function writeJSON(key, val) {
 
 
 
+
+
+/* === SEBIT SHOP PURCHASE FINAL FIX ===
+   구매 버튼 → 구매 확인 → 구매 처리 흐름을 한 번에 안정화.
+   - 일부 iPad/Safari에서 crypto.randomUUID가 없어 구매 중단되는 문제 방지
+   - 30건/시간/수동잠금 제한이 구매를 막지 않게 처리
+   - 학생홈 메뉴의 data-go 안내 이벤트가 구매 버튼 클릭을 가로채지 않게 처리
+   - 구매 후 학생/상품/포켓/구매기록을 즉시 로컬 갱신 + Firestore 동기화 예약
+*/
+function sebitSafeId(prefix){
+  try{
+    if(window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+  }catch(_){}
+  return String(prefix || "id") + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 10);
+}
+function sebitNormalizeStudentId(v){
+  return String(v == null ? "" : v).trim();
+}
+function sebitGetCurrentStudent(){
+  try{
+    const sid = sebitNormalizeStudentId(session && session.studentId);
+    if(!sid) return null;
+    const arr = readJSON(LS.students, []);
+    if(!Array.isArray(arr)) return null;
+    return arr.find(s => sebitNormalizeStudentId(s.id) === sid) || null;
+  }catch(_){ return null; }
+}
+async function sebitPushPurchaseNowToCloud(){
+  try{ if(typeof syncStudentsToFirestoreNow === "function") await syncStudentsToFirestoreNow(); }catch(e){ console.warn("[SEBIT] purchase students cloud sync skipped", e); }
+  try{ if(typeof syncShopStateToFirestoreNow === "function") await syncShopStateToFirestoreNow(); }catch(e){ console.warn("[SEBIT] purchase shop cloud sync skipped", e); }
+}
+function sebitForceRefreshAfterPurchase(){
+  try{ if(typeof renderStudentShop === "function") renderStudentShop(); }catch(_){}
+  try{ if(typeof renderStudentPocket === "function") renderStudentPocket(); }catch(_){}
+  try{ if(typeof renderTeacherHome === "function") renderTeacherHome(); }catch(_){}
+}
+
 // === Light Pocket (학생: 나의 라이트 포켓) ===
 function loadLightPocketAll(){
   const raw = readJSON(LS.lightPocket, {});
@@ -1822,9 +1859,7 @@ function shopIncTodayCount(){
   obj[key] = Math.max(0, Number(obj?.[key]||0)) + 1;
   writeJSON(LS.shopDailyCounter, obj);
 }
-function shopIsClosed(){
-  return false;
-}
+function shopIsClosed(){ return false; }
 
 // === Light Merchant Requests (v1) ===
 function lmTodayKey(){ return shopTodayKey(); }
@@ -1986,8 +2021,7 @@ const cards = filtered.map(p=>{
     const effPrice = getEffectivePrice(p, deal);
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
-    const closed = shopIsClosed();
-    const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
+    const state = (isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중"));
     const disabled = (isSoldOut || isStopped);
 
 
@@ -2004,11 +2038,12 @@ const cards = filtered.map(p=>{
         <div class="muted small">재고 ${Number(p.stock||0)}</div>
         <div class="muted small lightshop-cat">${escapeHtml(p.category||"")}</div>
       </div>
-      <button class="btn wide lightshop-buy" ${disabled ? "disabled" : ""}>구매</button>
+      <button type="button" class="btn wide lightshop-buy" data-shop-buy="${escapeHtml(p.id)}" ${disabled ? "disabled" : ""}>구매</button>
     `;
     const btn = wrap.querySelector(".lightshop-buy");
     if(btn){
-      btn.addEventListener("click", ()=>{
+      btn.addEventListener("click", (ev)=>{
+        ev.preventDefault(); ev.stopPropagation();
         openPurchaseConfirm(p.id);
       });
     }
@@ -2025,7 +2060,7 @@ const cards = filtered.map(p=>{
 
 
 function openPurchaseConfirm(productId){
-  const me = getMe();
+  const me = sebitGetCurrentStudent();
   if(!me){ toast("다시 로그인해 주세요"); return; }
 
   const productsRaw = readJSON(LS.shopProducts, []);
@@ -2106,72 +2141,112 @@ function closePurchaseConfirm(){
 }
 
 function shopTryPurchase(productId){
-  const me = getMe();
-  if(!me){ toast("다시 로그인해 주세요"); return; }
-
-  const productsRaw = readJSON(LS.shopProducts, []);
-  const products = Array.isArray(productsRaw) ? productsRaw : [];
-  const idx = products.findIndex(p=> (p?.id||"") === productId);
-  if(idx < 0){ toast("상품을 찾을 수 없어요"); return; }
-
-  const p = products[idx];
-  const deal = getOrMakeDeal(products);
-  const price = getEffectivePrice(p, deal);
-  const stock = Math.max(0, Number(p?.stock||0));
-  const isStopped = (p?.isPublished === false);
-  if(isStopped){ toast("판매중단 상품입니다"); return; }
-  if(stock <= 0){ toast("품절 상품입니다"); return; }
-
-  const lumen = Math.max(0, Number(me.lumen||0));
-  if(lumen < price){ toast("루멘이 부족해요"); return; }
-
-  const items = getMyPocketItems(me.id);
-  const total = pocketTotalCount(items);
-  if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
-// 1) 학생 루멘 차감
-  const students = readJSON(LS.students, []);
-  const sidx = students.findIndex(s=>s.id === me.id);
-  if(sidx >= 0){
-    students[sidx].lumen = lumen - price;
-    writeJSON(LS.students, students);
+  if(window.__sebitPurchaseBusy){
+    toast("구매 처리 중입니다.");
+    return;
   }
+  window.__sebitPurchaseBusy = true;
 
-  // 2) 재고 -1
-  products[idx].stock = stock - 1;
-  writeJSON(LS.shopProducts, products);
+  try{
+    const studentId = sebitNormalizeStudentId(session && session.studentId);
+    if(!studentId){
+      toast("다시 로그인해 주세요");
+      return;
+    }
 
-  // 3) 포켓 +1 (슬롯형: 구매 1번 = 1칸)
-const imgId = Number.isFinite(p?.imgId) ? p.imgId : 0;
-items.push({
-  id: crypto.randomUUID(),
-  productId: productId,
-  name: String(p?.name||"상품"),
-  image: String((Number(imgId)%10)+1), // 렌더러에서 숫자 라벨로 표시
-  status: "normal"
-});
-setMyPocketItems(me.id, items);
+    const studentsRaw = readJSON(LS.students, []);
+    const students = Array.isArray(studentsRaw) ? studentsRaw : [];
+    const sidx = students.findIndex(s => sebitNormalizeStudentId(s.id) === studentId);
+    if(sidx < 0){
+      toast("학생 정보를 찾을 수 없어요. 다시 로그인해 주세요.");
+      return;
+    }
 
-  // 4) 구매 성공 로그(최근 50)
-  const logsRaw = readJSON(LS.shopPurchaseLog, []);
-  const logs = Array.isArray(logsRaw) ? logsRaw : [];
-  logs.push({
-    ts: new Date().toISOString(),
-    studentId: me.id,
-    studentName: String(me.name||""),
-    student: String(me.name||""),
-    productId,
-    productName: String(p?.name||"상품"),
-    product: String(p?.name||"상품"),
-    price
-  });
-  while(logs.length > 50) logs.shift();
-  writeJSON(LS.shopPurchaseLog, logs);
+    const productsRaw = readJSON(LS.shopProducts, []);
+    const products = Array.isArray(productsRaw) ? productsRaw : [];
+    const idx = products.findIndex(p => String(p?.id || "") === String(productId || ""));
+    if(idx < 0){
+      toast("상품을 찾을 수 없어요.");
+      return;
+    }
 
-  // 지급요청(선착순 30건) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
-  toast("구매 완료!");
-  // UI 갱신
-  renderStudentShop();
-  renderStudentPocket();
+    const p = products[idx] || {};
+    const deal = (typeof getOrMakeDeal === "function") ? getOrMakeDeal(products) : null;
+    const price = Math.max(0, Number((typeof getEffectivePrice === "function") ? getEffectivePrice(p, deal) : p.price || 0));
+    const stock = Math.max(0, Number(p.stock || 0));
+    const isStopped = (p.isPublished === false);
+
+    if(isStopped){
+      toast("판매중단 상품입니다.");
+      return;
+    }
+    if(stock <= 0){
+      toast("품절 상품입니다.");
+      return;
+    }
+
+    const lumen = Math.max(0, Number(students[sidx].lumen || 0));
+    if(lumen < price){
+      toast("루멘이 부족해요.");
+      return;
+    }
+
+    const items = getMyPocketItems(studentId);
+    const total = pocketTotalCount(items);
+    if(total >= 10){
+      toast("라이트 포켓이 가득 찼어요(10개).");
+      return;
+    }
+
+    // 1) 학생 루멘 차감
+    students[sidx] = { ...students[sidx], lumen: lumen - price };
+    writeJSON(LS.students, students);
+
+    // 2) 상품 재고 차감
+    products[idx] = { ...products[idx], stock: stock - 1 };
+    writeJSON(LS.shopProducts, products);
+
+    // 3) 라이트 포켓 추가
+    const imgId = Number.isFinite(Number(p.imgId)) ? Number(p.imgId) : 0;
+    items.push({
+      id: sebitSafeId("pocket"),
+      productId: String(productId),
+      name: String(p.name || "상품"),
+      image: String((Number(imgId) % 10) + 1),
+      status: "normal",
+      purchasedAt: new Date().toISOString()
+    });
+    setMyPocketItems(studentId, items);
+
+    // 4) 구매 기록 추가
+    const logsRaw = readJSON(LS.shopPurchaseLog, []);
+    const logs = Array.isArray(logsRaw) ? logsRaw : [];
+    logs.push({
+      id: sebitSafeId("purchase"),
+      ts: new Date().toISOString(),
+      studentId,
+      studentName: String(students[sidx].name || ""),
+      student: String(students[sidx].name || ""),
+      productId: String(productId),
+      productName: String(p.name || "상품"),
+      product: String(p.name || "상품"),
+      price
+    });
+    while(logs.length > 50) logs.shift();
+    writeJSON(LS.shopPurchaseLog, logs);
+
+    toast("구매 완료!");
+    sebitForceRefreshAfterPurchase();
+
+    // 화면은 즉시 바꾸고, 서버는 바로 밀어넣기
+    setTimeout(()=>{ sebitPushPurchaseNowToCloud(); }, 0);
+
+  }catch(err){
+    console.error("[SEBIT] shop purchase failed", err);
+    toast("구매 처리 중 오류가 났어요. 새로고침 후 다시 시도해 주세요.");
+  }finally{
+    setTimeout(()=>{ window.__sebitPurchaseBusy = false; }, 350);
+  }
 }
 
 
@@ -2530,7 +2605,7 @@ function renderTeacherHome() {
 function renderInputWindowBanner() {
   const el = $("#studentInputWindowMsg");
   if (!el) return;
-  if (false) {
+  if (kstHour() >= 17) {
     el.classList.add("is-closed");
     el.textContent = "17:00 이후에는 입력할 수 없습니다.";
   } else {
@@ -2933,7 +3008,7 @@ function renderStudentHomeV1(){
 
   // input window banner
   const msg = $("#studentInputWindowMsg");
-  const locked = false;
+  const locked = (kstHour() >= 17);
   if (msg) {
     if (locked) {
       msg.style.display = 'block';
@@ -2988,7 +3063,7 @@ function renderStudentHomeV1(){
 
 function setMorning(flag){
   const msg = $("#morningStateMsg");
-  if (false) { return; }
+  if (kstHour() >= 17) { toast("17:00 이후에는 입력할 수 없습니다."); return; }
   const today = todayKey();
   const d = ensureTodayActivityRecord(session.studentId);
   d[today][session.studentId].morning = !!flag;
@@ -3066,7 +3141,7 @@ function applyReadingSelection(){
   const rec = (daily[today] && daily[today][session.studentId]) ? daily[today][session.studentId] : null;
   if (!rec) return;
 
-  const locked = false;
+  const locked = (kstHour() >= 17);
   const sel = $("#studentReadingSelect");
   const val = sel ? sel.value : '';
   if (locked) {
@@ -3096,7 +3171,7 @@ function applyReadingSelection(){
 }
 
 function commitReadingEntry(){
-  if (false) { return; }
+  if (kstHour() >= 17) { toast("17:00 이후에는 저장할 수 없습니다."); return; }
   ensureTodayActivityRecord(session.studentId);
   const today = todayKey();
   const daily = getDailyActivity();
@@ -3312,7 +3387,7 @@ function renderStudentActivity(){
   // morning buttons
   const mDoneBtn = $("#studentMorningDoneBtn");
   const mCancelBtn = $("#studentMorningCancelBtn");
-  const locked = false;
+  const locked = (kstHour() >= 17);
   if (mDoneBtn) {
     mDoneBtn.disabled = !!rec.morning || locked;
     mDoneBtn.classList.toggle('success', !!rec.morning);
@@ -4280,9 +4355,28 @@ function bindStudentQuickReadonlyButtons(){
   }, true);
 }
 
+
+
+/* 구매 버튼 전용 캡처 핸들러: data-go 임시 안내보다 먼저 실행 */
+document.addEventListener("click", function(e){
+  const buy = e.target && e.target.closest ? e.target.closest("[data-shop-buy]") : null;
+  if(!buy) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if(typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+  if(buy.disabled){
+    toast("구매할 수 없는 상품입니다.");
+    return;
+  }
+  const pid = buy.getAttribute("data-shop-buy");
+  if(pid) openPurchaseConfirm(pid);
+}, true);
+
 function bind() {
   bindStudentQuickReadonlyButtons();
   document.addEventListener("click", (e) => {
+    if(e.defaultPrevented) return;
+    if(e.target && e.target.closest && e.target.closest("[data-shop-buy]")) return;
     const g = e.target.closest("[data-thermo-grant]");
     if (g) { setThermoClaim(g.getAttribute("data-thermo-grant"), true); return; }
     const c = e.target.closest("[data-thermo-cancel]");
@@ -4406,8 +4500,7 @@ function bind() {
     const qid = btn.getAttribute("data-qopen");
     openQuestDetailModal(qid);
   });
-  // Menu buttons: data-go handler above handles connected student pages.
-
+  // Menu buttons: 실제 data-go 이동은 공통 핸들러에서 처리함. 임시 안내 토스트 제거.
   $("#closePinResetModalBtn")?.addEventListener("click", closePinResetModal);
   $("#savePinResetBtn")?.addEventListener("click", savePinReset);
   $("#pinResetModal")?.addEventListener("click", (e)=>{ if (e.target.id==="pinResetModal") closePinResetModal(); });
@@ -12177,5 +12270,59 @@ function closeStudentShopPreviewModal(){
     setTimeout(function(){
       window.__sebitStudentShopPurchaseBusy = false;
     }, 2200);
+  }, true);
+})();
+
+
+/* === SEBIT PATCH: real student shop purchase binding final ===
+   - 학생홈 메뉴의 임시 안내 토스트가 상점 버튼을 방해하지 않도록 차단
+   - 구매 버튼 클릭을 캡처 단계에서 직접 잡아 openPurchaseConfirm으로 연결
+   - 자동 30건 제한은 구매/지급 흐름에 적용하지 않음
+*/
+(function installSebitRealShopPurchaseBinding(){
+  if(window.__sebitRealShopPurchaseBindingInstalled) return;
+  window.__sebitRealShopPurchaseBindingInstalled = true;
+
+  function getProductIdFromBuyButton(btn){
+    if(!btn) return "";
+    const direct = btn.getAttribute("data-shop-buy") || btn.dataset?.shopBuy || "";
+    if(direct) return String(direct);
+    const card = btn.closest(".lightshop-item");
+    const grid = document.getElementById("studentShopGrid");
+    if(!card || !grid) return "";
+    const cards = Array.from(grid.querySelectorAll(".lightshop-item"));
+    const idx = cards.indexOf(card);
+    const products = (typeof readJSON === "function" && typeof LS !== "undefined") ? readJSON(LS.shopProducts, []) : [];
+    const visible = Array.isArray(products) ? products.filter(p => !(p && p.isPublished === false && false)) : [];
+    const selectedCat = (localStorage.getItem("sebit:shopCat") || "전체");
+    const filtered = selectedCat === "전체" ? visible : visible.filter(p => String(p?.category||"") === selectedCat);
+    return String(filtered[idx]?.id || "");
+  }
+
+  document.addEventListener("click", function(e){
+    try{
+      const page = String(document.body.getAttribute("data-page") || "");
+      if(page !== "student-shop") return;
+      const btn = e.target.closest ? e.target.closest("button.lightshop-buy") : null;
+      if(!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if(typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+      if(btn.disabled){
+        if(typeof toast === "function") toast("품절 또는 판매중단 상품입니다.");
+        return;
+      }
+      const id = getProductIdFromBuyButton(btn);
+      if(!id){
+        if(typeof toast === "function") toast("상품 정보를 다시 불러와 주세요.");
+        return;
+      }
+      if(typeof openPurchaseConfirm === "function") openPurchaseConfirm(id);
+      else if(typeof shopTryPurchase === "function") shopTryPurchase(id);
+      else if(typeof toast === "function") toast("구매 기능 연결을 찾지 못했어요.");
+    }catch(err){
+      console.error("[SEBIT] shop purchase binding failed", err);
+      try{ if(typeof toast === "function") toast("구매 처리 중 오류가 났어요."); }catch(_){ }
+    }
   }, true);
 })();
