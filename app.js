@@ -799,9 +799,12 @@ function startJobFirestoreRealtimeSync(){
     const ret = originalSetItem.apply(this, arguments);
     try{
       if(this === window.localStorage){
-        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
-        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
-        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
+        const __k = String(key || "");
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(__k)) scheduleShopFirestoreSync();
+        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(__k)) scheduleActivityFirestoreSync();
+        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(__k)) scheduleJobFirestoreSync(__k);
+        if(typeof LS !== "undefined" && __k === LS.students && typeof scheduleStudentsFirestoreSync === "function") scheduleStudentsFirestoreSync();
+        if(typeof LS_KEYS !== "undefined" && __k === LS_KEYS.penaltyStore && typeof schedulePenaltyLogsFirestoreSync === "function") schedulePenaltyLogsFirestoreSync();
       }
     }catch(_){ }
     return ret;
@@ -810,9 +813,12 @@ function startJobFirestoreRealtimeSync(){
     const ret = originalRemoveItem.apply(this, arguments);
     try{
       if(this === window.localStorage){
-        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
-        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
-        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
+        const __k = String(key || "");
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(__k)) scheduleShopFirestoreSync();
+        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(__k)) scheduleActivityFirestoreSync();
+        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(__k)) scheduleJobFirestoreSync(__k);
+        if(typeof LS !== "undefined" && __k === LS.students && typeof scheduleStudentsFirestoreSync === "function") scheduleStudentsFirestoreSync();
+        if(typeof LS_KEYS !== "undefined" && __k === LS_KEYS.penaltyStore && typeof schedulePenaltyLogsFirestoreSync === "function") schedulePenaltyLogsFirestoreSync();
       }
     }catch(_){ }
     return ret;
@@ -1043,7 +1049,8 @@ const LS = {
   students: "sebit:students",
   thermo: "sebit:thermometer",
   activityDaily: "sebit:activityDaily", // { [YYYY-MM-DD]: { [studentId]: {morning:boolean, reading:[{start,end,ts}]} } }
-  activityReadingHistory: "sebit:activityReadingHistory", // { [studentId]: [{date,start,end,pages,ts}] }
+  activityReadingHistory: "sebit:activityReadingHistory",
+  activitySettings: "sebit:activitySettings", // { [studentId]: [{date,start,end,pages,ts}] }
   calendar: "sebit:calendarEvents", // 일정 누적
   meals: "sebit:todayLunch",       // 오늘 급식(0시 삭제)
   calendarDrafts: "sebit:calendarDrafts", // 일정 임시저장(날짜별)
@@ -1095,7 +1102,7 @@ function writeThermo(next){
    - 기존 UI는 LS.activityDaily / LS.activityReadingHistory를 그대로 읽고, 저장될 때 서버에 자동 반영
 */
 const FS_ACTIVITY_STATE_COLLECTION = "activityState";
-const FS_ACTIVITY_KEYS = ["activityDaily", "activityReadingHistory"];
+const FS_ACTIVITY_KEYS = ["activityDaily", "activityReadingHistory", "activitySettings"];
 let __sebitActivityLoadingFromFirestore = false;
 let __sebitActivitySyncTimer = null;
 let __sebitActivityRealtimeStarted = false;
@@ -1106,6 +1113,7 @@ function fsActivityLocalStorageKeyFromName(name){
     if(typeof LS === "undefined") return "";
     if(name === "activityDaily") return LS.activityDaily;
     if(name === "activityReadingHistory") return LS.activityReadingHistory;
+    if(name === "activitySettings") return LS.activitySettings;
   }catch(_){ }
   return "";
 }
@@ -1114,10 +1122,14 @@ function fsActivityKeyNameFromLSKey(key){
     if(typeof LS === "undefined") return "";
     if(key === LS.activityDaily) return "activityDaily";
     if(key === LS.activityReadingHistory) return "activityReadingHistory";
+    if(key === LS.activitySettings) return "activitySettings";
   }catch(_){ }
   return "";
 }
-function fsDefaultValueForActivityKey(name){ return {}; }
+function fsDefaultValueForActivityKey(name){
+  if(name === "activitySettings") return { inputLocked:false, updatedAt:0 };
+  return {};
+}
 function fsReadActivityValue(name){
   const key = fsActivityLocalStorageKeyFromName(name);
   if(!key) return fsDefaultValueForActivityKey(name);
@@ -1173,15 +1185,17 @@ async function loadActivityStateFromFirestore(){
   finally{ __sebitActivityLoadingFromFirestore = false; }
 }
 function refreshActivityPagesFromRealtime(){
-  try{
-    const page = String(document.body.getAttribute("data-page") || "");
-    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
-    if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
-    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
-    if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
-    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
-    if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
-  }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
+  sebitRunRealtimeRefreshSafely(function(){
+    try{
+      const page = String(document.body.getAttribute("data-page") || "");
+      if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+      if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
+      if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+      if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
+      if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
+      if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
+    }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
+  });
 }
 function startActivityFirestoreRealtimeSync(){
   if(__sebitActivityRealtimeStarted) return;
@@ -2198,7 +2212,9 @@ function shopTryPurchase(productId){
   const sidx = students.findIndex(s=>s.id === me.id);
   if(sidx >= 0){
     students[sidx].lumen = lumen - price;
+    students[sidx].updatedAt = Date.now();
     writeJSON(LS.students, students);
+    try { syncOneStudentToFirestoreNow(students[sidx]); } catch(_) {}
   }
 
   // 2) 재고 -1
@@ -2231,6 +2247,7 @@ setMyPocketItems(me.id, items);
   });
   while(logs.length > 50) logs.shift();
   writeJSON(LS.shopPurchaseLog, logs);
+  try { syncShopStateToFirestoreNow(); } catch(_) {}
 
   // 지급요청(선착순 30건) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
   toast("구매 완료!");
@@ -2595,12 +2612,12 @@ function renderTeacherHome() {
 function renderInputWindowBanner() {
   const el = $("#studentInputWindowMsg");
   if (!el) return;
-  if (kstHour() >= 17) {
+  if (isActivityInputLocked()) {
     el.classList.add("is-closed");
-    el.textContent = "17:00 이후에는 입력할 수 없습니다.";
+    el.textContent = "교사가 학생 입력을 잠근 상태입니다.";
   } else {
     el.classList.remove("is-closed");
-    el.textContent = "입력 가능 시간입니다. (00:00~17:00)";
+    el.textContent = "입력 가능 상태입니다.";
   }
 }
 function renderThermometer() {
@@ -2998,11 +3015,11 @@ function renderStudentHomeV1(){
 
   // input window banner
   const msg = $("#studentInputWindowMsg");
-  const locked = (kstHour() >= 17);
+  const locked = isActivityInputLocked();
   if (msg) {
     if (locked) {
       msg.style.display = 'block';
-      msg.textContent = '17:00 이후에는 입력할 수 없습니다.';
+      msg.textContent = '교사가 학생 입력을 잠근 상태입니다.';
     } else {
       msg.style.display = 'none';
       msg.textContent = '';
@@ -3053,7 +3070,7 @@ function renderStudentHomeV1(){
 
 function setMorning(flag){
   const msg = $("#morningStateMsg");
-  if (kstHour() >= 17) { toast("17:00 이후에는 입력할 수 없습니다."); return; }
+  if (isActivityInputLocked()) { toast("교사가 학생 입력을 잠근 상태입니다."); return; }
   const today = todayKey();
   const d = ensureTodayActivityRecord(session.studentId);
   d[today][session.studentId].morning = !!flag;
@@ -3131,7 +3148,7 @@ function applyReadingSelection(){
   const rec = (daily[today] && daily[today][session.studentId]) ? daily[today][session.studentId] : null;
   if (!rec) return;
 
-  const locked = (kstHour() >= 17);
+  const locked = isActivityInputLocked();
   const sel = $("#studentReadingSelect");
   const val = sel ? sel.value : '';
   if (locked) {
@@ -3161,7 +3178,7 @@ function applyReadingSelection(){
 }
 
 function commitReadingEntry(){
-  if (kstHour() >= 17) { toast("17:00 이후에는 저장할 수 없습니다."); return; }
+  if (isActivityInputLocked()) { toast("교사가 학생 입력을 잠근 상태입니다."); return; }
   ensureTodayActivityRecord(session.studentId);
   const today = todayKey();
   const daily = getDailyActivity();
@@ -3342,6 +3359,43 @@ function renderStudentDonationStatus(){
 }
 
 
+/* === Activity input lock setting (teacher ON/OFF, synced) === */
+function getActivitySettings(){
+  const base = { inputLocked:false, updatedAt:0 };
+  const raw = readJSON(LS.activitySettings, base);
+  return { ...base, ...(raw && typeof raw === "object" ? raw : {}) };
+}
+function setActivitySettings(next){
+  const merged = { ...getActivitySettings(), ...(next || {}), updatedAt:Date.now() };
+  writeJSON(LS.activitySettings, merged);
+  try { scheduleActivityFirestoreSync(); } catch(_) {}
+  try { renderActivityLockControl(); } catch(_) {}
+  try { renderInputWindowBanner(); } catch(_) {}
+  try { renderStudentActivity(); } catch(_) {}
+}
+function isActivityInputLocked(){
+  return !!getActivitySettings().inputLocked;
+}
+function renderActivityLockControl(){
+  const box = document.getElementById("activityLockControl");
+  if(!box) return;
+  const locked = isActivityInputLocked();
+  const state = document.getElementById("activityLockState");
+  if(state){
+    state.textContent = locked ? "현재 상태: 학생 입력 잠금" : "현재 상태: 학생 입력 열림";
+    state.classList.toggle("is-closed", locked);
+  }
+  const closeBtn = document.getElementById("activityLockCloseBtn");
+  const openBtn = document.getElementById("activityLockOpenBtn");
+  if(closeBtn) closeBtn.disabled = locked;
+  if(openBtn) openBtn.disabled = !locked;
+}
+function setActivityInputLocked(flag){
+  setActivitySettings({ inputLocked:!!flag });
+  try { toast(flag ? "학생 입력을 잠갔습니다." : "학생 입력을 열었습니다."); } catch(_) {}
+  try { renderTeacherActivity(); } catch(_) {}
+}
+
 /* === Activity (Morning/Reading) === */
 function getDailyActivity(){
   return readJSON(LS.activityDaily, {});
@@ -3377,7 +3431,7 @@ function renderStudentActivity(){
   // morning buttons
   const mDoneBtn = $("#studentMorningDoneBtn");
   const mCancelBtn = $("#studentMorningCancelBtn");
-  const locked = (kstHour() >= 17);
+  const locked = isActivityInputLocked();
   if (mDoneBtn) {
     mDoneBtn.disabled = !!rec.morning || locked;
     mDoneBtn.classList.toggle('success', !!rec.morning);
@@ -3463,11 +3517,12 @@ function renderStudentActivity(){
   }
 
   const hint = $("#studentReadingSavedHint");
-  if (hint && locked) hint.textContent = "17:00 이후 입력 잠금";
+  if (hint) hint.textContent = locked ? "교사 입력 잠금 중" : "입력하면 자동 저장됩니다.";
 }
 
 
 function renderTeacherActivity(){
+  renderActivityLockControl();
   const today = todayKey();
   const label = $("#activityTodayLabel");
   if (label) label.textContent = `기준 날짜: ${today}`;
@@ -4480,8 +4535,10 @@ function bind() {
   $("#closePinResetModalBtn")?.addEventListener("click", closePinResetModal);
   $("#savePinResetBtn")?.addEventListener("click", savePinReset);
   $("#pinResetModal")?.addEventListener("click", (e)=>{ if (e.target.id==="pinResetModal") closePinResetModal(); });
+  $("#activityLockCloseBtn")?.addEventListener("click", ()=> setActivityInputLocked(true));
+  $("#activityLockOpenBtn")?.addEventListener("click", ()=> setActivityInputLocked(false));
 
-  // Morning study (17:00 lock)
+  // Morning study (teacher lock ON/OFF)
   $("#studentMorningDoneBtn")?.addEventListener("click", ()=> setMorning(true));
   $("#studentMorningCancelBtn")?.addEventListener("click", ()=> setMorning(false));
 
@@ -12247,4 +12304,48 @@ function closeStudentShopPreviewModal(){
       window.__sebitStudentShopPurchaseBusy = false;
     }, 2200);
   }, true);
+})();
+
+
+/* === SEBIT cloud strict patch 2026-05-11 ===
+   목적: iPad 입력이 localStorage에만 머물지 않도록 학생/벌점/상점 핵심 저장을 Firestore에 즉시 반영.
+*/
+(function installSebitCloudStrictPatch(){
+  if(window.__sebitCloudStrictPatchInstalled) return;
+  window.__sebitCloudStrictPatchInstalled = true;
+  const flush = function(key){
+    try{
+      const k = String(key || "");
+      if(typeof LS !== "undefined" && k === LS.students && typeof syncStudentsToFirestoreNow === "function") {
+        setTimeout(syncStudentsToFirestoreNow, 0);
+      }
+      if(typeof LS_KEYS !== "undefined" && k === LS_KEYS.penaltyStore && typeof syncPenaltyLogsToFirestoreNow === "function") {
+        setTimeout(syncPenaltyLogsToFirestoreNow, 0);
+      }
+      if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(k) && typeof syncShopStateToFirestoreNow === "function") {
+        setTimeout(syncShopStateToFirestoreNow, 0);
+      }
+      if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(k) && typeof syncActivityStateToFirestoreNow === "function") {
+        setTimeout(syncActivityStateToFirestoreNow, 0);
+      }
+    }catch(err){ console.warn("[SEBIT CLOUD STRICT] flush skipped", err); }
+  };
+  const prevSet = Storage.prototype.setItem;
+  const prevRemove = Storage.prototype.removeItem;
+  Storage.prototype.setItem = function(key, value){
+    const ret = prevSet.apply(this, arguments);
+    if(this === window.localStorage) flush(key);
+    return ret;
+  };
+  Storage.prototype.removeItem = function(key){
+    const ret = prevRemove.apply(this, arguments);
+    if(this === window.localStorage) flush(key);
+    return ret;
+  };
+  window.addEventListener("online", function(){
+    try{ if(typeof syncStudentsToFirestoreNow === "function") syncStudentsToFirestoreNow(); }catch(_){}
+    try{ if(typeof syncPenaltyLogsToFirestoreNow === "function") syncPenaltyLogsToFirestoreNow(); }catch(_){}
+    try{ if(typeof syncShopStateToFirestoreNow === "function") syncShopStateToFirestoreNow(); }catch(_){}
+    try{ if(typeof syncActivityStateToFirestoreNow === "function") syncActivityStateToFirestoreNow(); }catch(_){}
+  });
 })();

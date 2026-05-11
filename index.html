@@ -404,6 +404,14 @@
             <div class="panel">
               <h3>오늘 입력 현황</h3>
               <div class="muted small" id="activityTodayLabel"></div>
+              <div class="activity-lock-control callout" id="activityLockControl">
+                <b>학생 입력 잠금</b>
+                <div class="muted small" id="activityLockState">현재 상태 확인 중</div>
+                <div class="row" style="gap:8px; margin-top:8px; flex-wrap:wrap;">
+                  <button class="btn" id="activityLockCloseBtn" type="button">학생 입력 잠그기</button>
+                  <button class="btn primary" id="activityLockOpenBtn" type="button">학생 입력 열기</button>
+                </div>
+              </div>
               <div class="activity-table-wrap" id="activityTableWrap"></div>
             </div>
 
@@ -415,7 +423,7 @@
                 <li>누가 기록: <b>이전 날짜만</b> 열람/삭제</li>
               </ul>
               <div class="callout">
-                학생이 입력하면 자동 반영됩니다. (교사 승인 없음)
+                학생이 입력하면 자동 반영됩니다. 입력 마감은 시간 기준이 아니라 교사가 직접 잠그기/열기로 관리합니다.
               </div>
             </div>
           </div>
@@ -788,7 +796,7 @@
           <!-- 9단. 닫기 -->
           <button class="student-v1-close" id="studentCloseBtn">닫기</button>
           <p class="hint">활동 기록은 오늘만 입력/취소 가능합니다. (0시 초기화)
-            <span class="muted">· 17:00 이후 입력 잠금</span></p>
+            <span class="muted">· 교사가 입력을 잠그면 저장되지 않습니다.</span></p>
         </div>
       </div>
     </section>
