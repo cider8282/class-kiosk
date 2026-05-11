@@ -1890,7 +1890,8 @@ function shopIncTodayCount(){
   writeJSON(LS.shopDailyCounter, obj);
 }
 function shopIsClosed(){
-  return shopGetTodayCount() >= 30;
+  // 지급 요청 30건 제한 제거
+  return false;
 }
 
 // === Light Merchant Requests (v1) ===
@@ -2053,9 +2054,10 @@ const cards = filtered.map(p=>{
     const effPrice = getEffectivePrice(p, deal);
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
-    const closed = shopIsClosed();
-    const state = closed ? "마감" : (isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중"));
-    const disabled = (isSoldOut || isStopped || closed);
+    // 구매는 라이트 포켓의 "지급 요청 30건 마감"과 별개입니다.
+    // 기존에는 shopIsClosed()가 구매 버튼까지 disabled 처리해서, 지급 요청이 30건이면 구매 자체가 막히는 문제가 있었습니다.
+    const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
+    const disabled = (isSoldOut || isStopped);
 
 
     const wrap = document.createElement("div");
@@ -2071,7 +2073,7 @@ const cards = filtered.map(p=>{
         <div class="muted small">재고 ${Number(p.stock||0)}</div>
         <div class="muted small lightshop-cat">${escapeHtml(p.category||"")}</div>
       </div>
-      <button class="btn wide lightshop-buy" ${disabled ? "disabled" : ""}>구매</button>
+      <button type="button" class="btn wide lightshop-buy" data-product-id="${escapeHtml(p.id)}" ${disabled ? "disabled" : ""}>구매</button>
     `;
     const btn = wrap.querySelector(".lightshop-buy");
     if(btn){
@@ -2109,11 +2111,7 @@ function openPurchaseConfirm(productId){
   const items = getMyPocketItems(me.id);
   const total = pocketTotalCount(items);
 
-  if(shopIsClosed()){
-    toast("오늘 상품 지급 신청이 마감되었어요.");
-    return;
-  }
-
+  // shopIsClosed()는 라이트 포켓 지급 요청 마감 전용입니다. 구매 자체는 막지 않습니다.
   if(isStopped){ toast("판매중단 상품입니다"); return; }
   if(stock <= 0){ toast("품절 상품입니다"); return; }
   if(Math.max(0, Number(me.lumen||0)) < price){ toast("루멘이 부족해요"); return; }
@@ -2202,10 +2200,7 @@ function shopTryPurchase(productId){
   const total = pocketTotalCount(items);
   if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
 
-  if(shopIsClosed()){
-    toast("오늘 상품 지급 신청이 마감되었어요.");
-    return;
-  }
+  // shopIsClosed()는 라이트 포켓 지급 요청 마감 전용입니다. 구매 자체는 막지 않습니다.
 
   // 1) 학생 루멘 차감
   const students = readJSON(LS.students, []);
@@ -12306,6 +12301,30 @@ function closeStudentShopPreviewModal(){
   }, true);
 })();
 
+
+
+
+/* === SEBIT PATCH: robust student shop buy click 2026-05-11 ===
+   iPad에서 직접 바인딩된 클릭 핸들러가 리렌더로 사라지거나, button 기본 동작이 꼬이는 상황을 막기 위한 위임 핸들러입니다.
+*/
+(function installSebitRobustShopBuyClick(){
+  if(window.__sebitRobustShopBuyClickInstalled) return;
+  window.__sebitRobustShopBuyClickInstalled = true;
+  document.addEventListener("click", function(e){
+    try{
+      if(String(document.body.getAttribute("data-page") || "") !== "student-shop") return;
+      const btn = e.target && e.target.closest ? e.target.closest("button.lightshop-buy") : null;
+      const grid = document.getElementById("studentShopGrid");
+      if(!btn || !grid || !grid.contains(btn)) return;
+      if(btn.disabled) return;
+      const productId = btn.getAttribute("data-product-id");
+      if(!productId) return;
+      e.preventDefault();
+      if(typeof sebitHoldRealtimeRender === "function") sebitHoldRealtimeRender(2200);
+      if(typeof openPurchaseConfirm === "function") openPurchaseConfirm(productId);
+    }catch(err){ console.warn("[SEBIT SHOP] delegated buy click skipped", err); }
+  }, true);
+})();
 
 /* === SEBIT cloud strict patch 2026-05-11 ===
    목적: iPad 입력이 localStorage에만 머물지 않도록 학생/벌점/상점 핵심 저장을 Firestore에 즉시 반영.
