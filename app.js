@@ -2039,9 +2039,9 @@ const cards = filtered.map(p=>{
     const effPrice = getEffectivePrice(p, deal);
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
-    // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
-    const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
-    const disabled = (isSoldOut || isStopped);
+    const closed = shopIsClosed();
+    const state = closed ? "마감" : (isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중"));
+    const disabled = (isSoldOut || isStopped || closed);
 
 
     const wrap = document.createElement("div");
@@ -2095,7 +2095,11 @@ function openPurchaseConfirm(productId){
   const items = getMyPocketItems(me.id);
   const total = pocketTotalCount(items);
 
-  // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
+  if(shopIsClosed()){
+    toast("오늘 상품 지급 신청이 마감되었어요.");
+    return;
+  }
+
   if(isStopped){ toast("판매중단 상품입니다"); return; }
   if(stock <= 0){ toast("품절 상품입니다"); return; }
   if(Math.max(0, Number(me.lumen||0)) < price){ toast("루멘이 부족해요"); return; }
@@ -2184,7 +2188,10 @@ function shopTryPurchase(productId){
   const total = pocketTotalCount(items);
   if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
 
-  // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
+  if(shopIsClosed()){
+    toast("오늘 상품 지급 신청이 마감되었어요.");
+    return;
+  }
 
   // 1) 학생 루멘 차감
   const students = readJSON(LS.students, []);
@@ -2226,9 +2233,6 @@ setMyPocketItems(me.id, items);
   writeJSON(LS.shopPurchaseLog, logs);
 
   // 지급요청(선착순 30건) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
-  // 구매 직후에는 지연 타이머만 기다리지 않고 핵심 데이터를 즉시 서버 반영 시도함.
-  try { syncOneStudentToFirestoreNow(students[sidx] || me); } catch(_) {}
-  try { syncShopStateToFirestoreNow(); } catch(_) {}
   toast("구매 완료!");
   // UI 갱신
   renderStudentShop();
@@ -10606,28 +10610,8 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  runMidnightResetIfNeeded();
-  scheduleMidnightResetTick();
-  // rule: always intro on load
-  session.teacherAuthed = false;
-  session.studentId = null;
-
-  // 중요: 로그인 입력창과 기본 버튼은 Firestore 전체 로딩을 기다리지 않고 즉시 작동해야 함.
-  // 서버 동기화가 느려도 ID/PIN 입력이 멈추지 않도록 먼저 바인딩하고 첫 화면을 그림.
-  bind();
-  forceIntro();
-
-  Promise.allSettled([
-    loadTeacherAuthFromFirestore(),
-    loadStudentsFromFirestore(),
-    loadPenaltyLogsFromFirestore(),
-    loadShopStateFromFirestore(),
-    loadJobStateFromFirestore(),
-    loadConstitutionFromFirestore(),
-    loadThermoFromFirestore(),
-    loadActivityStateFromFirestore()
-  ]).then(() => {
-    // Firestore 로딩은 뒤에서 완료되면 현재 화면만 조용히 최신화함.
+  Promise.all([loadTeacherAuthFromFirestore(), loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
@@ -10637,6 +10621,14 @@ document.addEventListener("DOMContentLoaded", () => {
       installSebitRealtimeCostGuard();
     } catch (_) {}
   });
+  runMidnightResetIfNeeded();
+  scheduleMidnightResetTick();
+  // rule: always intro on load
+  session.teacherAuthed = false;
+  session.studentId = null;
+
+  bind();
+  forceIntro();
 });
 
 function wireCalendarUI(){
