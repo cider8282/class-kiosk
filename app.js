@@ -799,12 +799,9 @@ function startJobFirestoreRealtimeSync(){
     const ret = originalSetItem.apply(this, arguments);
     try{
       if(this === window.localStorage){
-        const __k = String(key || "");
-        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(__k)) scheduleShopFirestoreSync();
-        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(__k)) scheduleActivityFirestoreSync();
-        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(__k)) scheduleJobFirestoreSync(__k);
-        if(typeof LS !== "undefined" && __k === LS.students && typeof scheduleStudentsFirestoreSync === "function") scheduleStudentsFirestoreSync();
-        if(typeof LS_KEYS !== "undefined" && __k === LS_KEYS.penaltyStore && typeof schedulePenaltyLogsFirestoreSync === "function") schedulePenaltyLogsFirestoreSync();
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
+        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
+        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
       }
     }catch(_){ }
     return ret;
@@ -813,12 +810,9 @@ function startJobFirestoreRealtimeSync(){
     const ret = originalRemoveItem.apply(this, arguments);
     try{
       if(this === window.localStorage){
-        const __k = String(key || "");
-        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(__k)) scheduleShopFirestoreSync();
-        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(__k)) scheduleActivityFirestoreSync();
-        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(__k)) scheduleJobFirestoreSync(__k);
-        if(typeof LS !== "undefined" && __k === LS.students && typeof scheduleStudentsFirestoreSync === "function") scheduleStudentsFirestoreSync();
-        if(typeof LS_KEYS !== "undefined" && __k === LS_KEYS.penaltyStore && typeof schedulePenaltyLogsFirestoreSync === "function") schedulePenaltyLogsFirestoreSync();
+        if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(String(key || ""))) scheduleShopFirestoreSync();
+        if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(String(key || ""))) scheduleActivityFirestoreSync();
+        if(typeof scheduleJobFirestoreSync === "function" && isSebitJobStorageKey(String(key || ""))) scheduleJobFirestoreSync(String(key || ""));
       }
     }catch(_){ }
     return ret;
@@ -1049,8 +1043,7 @@ const LS = {
   students: "sebit:students",
   thermo: "sebit:thermometer",
   activityDaily: "sebit:activityDaily", // { [YYYY-MM-DD]: { [studentId]: {morning:boolean, reading:[{start,end,ts}]} } }
-  activityReadingHistory: "sebit:activityReadingHistory",
-  activitySettings: "sebit:activitySettings", // { [studentId]: [{date,start,end,pages,ts}] }
+  activityReadingHistory: "sebit:activityReadingHistory", // { [studentId]: [{date,start,end,pages,ts}] }
   calendar: "sebit:calendarEvents", // 일정 누적
   meals: "sebit:todayLunch",       // 오늘 급식(0시 삭제)
   calendarDrafts: "sebit:calendarDrafts", // 일정 임시저장(날짜별)
@@ -1102,7 +1095,7 @@ function writeThermo(next){
    - 기존 UI는 LS.activityDaily / LS.activityReadingHistory를 그대로 읽고, 저장될 때 서버에 자동 반영
 */
 const FS_ACTIVITY_STATE_COLLECTION = "activityState";
-const FS_ACTIVITY_KEYS = ["activityDaily", "activityReadingHistory", "activitySettings"];
+const FS_ACTIVITY_KEYS = ["activityDaily", "activityReadingHistory"];
 let __sebitActivityLoadingFromFirestore = false;
 let __sebitActivitySyncTimer = null;
 let __sebitActivityRealtimeStarted = false;
@@ -1113,7 +1106,6 @@ function fsActivityLocalStorageKeyFromName(name){
     if(typeof LS === "undefined") return "";
     if(name === "activityDaily") return LS.activityDaily;
     if(name === "activityReadingHistory") return LS.activityReadingHistory;
-    if(name === "activitySettings") return LS.activitySettings;
   }catch(_){ }
   return "";
 }
@@ -1122,14 +1114,10 @@ function fsActivityKeyNameFromLSKey(key){
     if(typeof LS === "undefined") return "";
     if(key === LS.activityDaily) return "activityDaily";
     if(key === LS.activityReadingHistory) return "activityReadingHistory";
-    if(key === LS.activitySettings) return "activitySettings";
   }catch(_){ }
   return "";
 }
-function fsDefaultValueForActivityKey(name){
-  if(name === "activitySettings") return { inputLocked:false, updatedAt:0 };
-  return {};
-}
+function fsDefaultValueForActivityKey(name){ return {}; }
 function fsReadActivityValue(name){
   const key = fsActivityLocalStorageKeyFromName(name);
   if(!key) return fsDefaultValueForActivityKey(name);
@@ -1185,17 +1173,15 @@ async function loadActivityStateFromFirestore(){
   finally{ __sebitActivityLoadingFromFirestore = false; }
 }
 function refreshActivityPagesFromRealtime(){
-  sebitRunRealtimeRefreshSafely(function(){
-    try{
-      const page = String(document.body.getAttribute("data-page") || "");
-      if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
-      if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
-      if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
-      if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
-      if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
-      if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
-    }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
-  });
+  try{
+    const page = String(document.body.getAttribute("data-page") || "");
+    if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
+    if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
+    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+    if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
+    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
+    if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
+  }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
 }
 function startActivityFirestoreRealtimeSync(){
   if(__sebitActivityRealtimeStarted) return;
@@ -1822,7 +1808,11 @@ function renderStudentPocket(){
     const btn = wrap.querySelector("button");
     if(btn && !requesting){
       btn.addEventListener("click", ()=>{
-        // 30건 제한 제거: 지급 요청은 제한 없이 생성
+        // 선착순 30건(하루) 초과 시: 신청 불가 안내(라이트 포켓에서)
+        if(shopIsClosed()){
+          toast("오늘 상품 지급 신청이 마감되었어요.");
+          return;
+        }
         // 요청 생성(빛의 상인 체크리스트 연동)
         const req = {
           id: "lm_"+Date.now()+"_"+Math.random().toString(16).slice(2),
@@ -1840,7 +1830,7 @@ function renderStudentPocket(){
         const list = lmGetTodayList();
         list.push(req);
         lmSetTodayList(list);
-        // 30건 제한 제거: 별도 신청 카운트 증가 없음
+        shopIncTodayCount(); // '지급 요청' 기준으로 카운트 증가
         it.status = "requested";
         it.requesting = true;
         it.requestedAt = Date.now();
@@ -1874,18 +1864,19 @@ function shopTodayKey(){
   return new Date().toISOString().slice(0,10);
 }
 function shopGetTodayCount(){
-  // 30건 제한 제거: 화면 표시용으로 오늘 생성된 지급 요청 수만 계산
-  try{
-    const list = lmGetTodayList();
-    return Array.isArray(list) ? list.length : 0;
-  }catch(_){ return 0; }
+  const obj = readJSON(LS.shopDailyCounter, {});
+  const key = shopTodayKey();
+  const n = Math.max(0, Number(obj?.[key]||0));
+  return n;
 }
 function shopIncTodayCount(){
-  // 30건 제한 제거: 더 이상 카운터를 증가시키지 않음
+  const obj = readJSON(LS.shopDailyCounter, {});
+  const key = shopTodayKey();
+  obj[key] = Math.max(0, Number(obj?.[key]||0)) + 1;
+  writeJSON(LS.shopDailyCounter, obj);
 }
 function shopIsClosed(){
-  // 30건 제한 제거: 자동 마감 없음
-  return false;
+  return shopGetTodayCount() >= 30;
 }
 
 // === Light Merchant Requests (v1) ===
@@ -1979,7 +1970,7 @@ function renderStudentShop(){
   const dailyEl = document.getElementById("studentShopDailyCount");
   if(dailyEl){
     const c = shopGetTodayCount();
-    dailyEl.textContent = `${c}건`;
+    dailyEl.textContent = `${Math.min(c,30)}/30`;
   }
 
 
@@ -2048,8 +2039,7 @@ const cards = filtered.map(p=>{
     const effPrice = getEffectivePrice(p, deal);
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
-    // 구매는 라이트 포켓의 "지급 요청 30건 마감"과 별개입니다.
-    // 기존에는 shopIsClosed()가 구매 버튼까지 disabled 처리해서, 지급 요청이 30건이면 구매 자체가 막히는 문제가 있었습니다.
+    // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
     const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
     const disabled = (isSoldOut || isStopped);
 
@@ -2067,7 +2057,7 @@ const cards = filtered.map(p=>{
         <div class="muted small">재고 ${Number(p.stock||0)}</div>
         <div class="muted small lightshop-cat">${escapeHtml(p.category||"")}</div>
       </div>
-      <button type="button" class="btn wide lightshop-buy" data-product-id="${escapeHtml(p.id)}" ${disabled ? "disabled" : ""}>구매</button>
+      <button class="btn wide lightshop-buy" ${disabled ? "disabled" : ""}>구매</button>
     `;
     const btn = wrap.querySelector(".lightshop-buy");
     if(btn){
@@ -2105,7 +2095,7 @@ function openPurchaseConfirm(productId){
   const items = getMyPocketItems(me.id);
   const total = pocketTotalCount(items);
 
-  // shopIsClosed()는 라이트 포켓 지급 요청 마감 전용입니다. 구매 자체는 막지 않습니다.
+  // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
   if(isStopped){ toast("판매중단 상품입니다"); return; }
   if(stock <= 0){ toast("품절 상품입니다"); return; }
   if(Math.max(0, Number(me.lumen||0)) < price){ toast("루멘이 부족해요"); return; }
@@ -2194,16 +2184,14 @@ function shopTryPurchase(productId){
   const total = pocketTotalCount(items);
   if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
 
-  // shopIsClosed()는 라이트 포켓 지급 요청 마감 전용입니다. 구매 자체는 막지 않습니다.
+  // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
 
   // 1) 학생 루멘 차감
   const students = readJSON(LS.students, []);
   const sidx = students.findIndex(s=>s.id === me.id);
   if(sidx >= 0){
     students[sidx].lumen = lumen - price;
-    students[sidx].updatedAt = Date.now();
     writeJSON(LS.students, students);
-    try { syncOneStudentToFirestoreNow(students[sidx]); } catch(_) {}
   }
 
   // 2) 재고 -1
@@ -2236,9 +2224,11 @@ setMyPocketItems(me.id, items);
   });
   while(logs.length > 50) logs.shift();
   writeJSON(LS.shopPurchaseLog, logs);
-  try { syncShopStateToFirestoreNow(); } catch(_) {}
 
-  // 지급요청(지급 요청) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
+  // 지급요청(선착순 30건) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
+  // 구매 직후에는 지연 타이머만 기다리지 않고 핵심 데이터를 즉시 서버 반영 시도함.
+  try { syncOneStudentToFirestoreNow(students[sidx] || me); } catch(_) {}
+  try { syncShopStateToFirestoreNow(); } catch(_) {}
   toast("구매 완료!");
   // UI 갱신
   renderStudentShop();
@@ -2601,12 +2591,12 @@ function renderTeacherHome() {
 function renderInputWindowBanner() {
   const el = $("#studentInputWindowMsg");
   if (!el) return;
-  if (isActivityInputLocked()) {
+  if (kstHour() >= 17) {
     el.classList.add("is-closed");
-    el.textContent = "교사가 학생 입력을 잠근 상태입니다.";
+    el.textContent = "17:00 이후에는 입력할 수 없습니다.";
   } else {
     el.classList.remove("is-closed");
-    el.textContent = "입력 가능 상태입니다.";
+    el.textContent = "입력 가능 시간입니다. (00:00~17:00)";
   }
 }
 function renderThermometer() {
@@ -3004,11 +2994,11 @@ function renderStudentHomeV1(){
 
   // input window banner
   const msg = $("#studentInputWindowMsg");
-  const locked = isActivityInputLocked();
+  const locked = (kstHour() >= 17);
   if (msg) {
     if (locked) {
       msg.style.display = 'block';
-      msg.textContent = '교사가 학생 입력을 잠근 상태입니다.';
+      msg.textContent = '17:00 이후에는 입력할 수 없습니다.';
     } else {
       msg.style.display = 'none';
       msg.textContent = '';
@@ -3059,7 +3049,7 @@ function renderStudentHomeV1(){
 
 function setMorning(flag){
   const msg = $("#morningStateMsg");
-  if (isActivityInputLocked()) { toast("교사가 학생 입력을 잠근 상태입니다."); return; }
+  if (kstHour() >= 17) { toast("17:00 이후에는 입력할 수 없습니다."); return; }
   const today = todayKey();
   const d = ensureTodayActivityRecord(session.studentId);
   d[today][session.studentId].morning = !!flag;
@@ -3137,7 +3127,7 @@ function applyReadingSelection(){
   const rec = (daily[today] && daily[today][session.studentId]) ? daily[today][session.studentId] : null;
   if (!rec) return;
 
-  const locked = isActivityInputLocked();
+  const locked = (kstHour() >= 17);
   const sel = $("#studentReadingSelect");
   const val = sel ? sel.value : '';
   if (locked) {
@@ -3167,7 +3157,7 @@ function applyReadingSelection(){
 }
 
 function commitReadingEntry(){
-  if (isActivityInputLocked()) { toast("교사가 학생 입력을 잠근 상태입니다."); return; }
+  if (kstHour() >= 17) { toast("17:00 이후에는 저장할 수 없습니다."); return; }
   ensureTodayActivityRecord(session.studentId);
   const today = todayKey();
   const daily = getDailyActivity();
@@ -3348,43 +3338,6 @@ function renderStudentDonationStatus(){
 }
 
 
-/* === Activity input lock setting (teacher ON/OFF, synced) === */
-function getActivitySettings(){
-  const base = { inputLocked:false, updatedAt:0 };
-  const raw = readJSON(LS.activitySettings, base);
-  return { ...base, ...(raw && typeof raw === "object" ? raw : {}) };
-}
-function setActivitySettings(next){
-  const merged = { ...getActivitySettings(), ...(next || {}), updatedAt:Date.now() };
-  writeJSON(LS.activitySettings, merged);
-  try { scheduleActivityFirestoreSync(); } catch(_) {}
-  try { renderActivityLockControl(); } catch(_) {}
-  try { renderInputWindowBanner(); } catch(_) {}
-  try { renderStudentActivity(); } catch(_) {}
-}
-function isActivityInputLocked(){
-  return !!getActivitySettings().inputLocked;
-}
-function renderActivityLockControl(){
-  const box = document.getElementById("activityLockControl");
-  if(!box) return;
-  const locked = isActivityInputLocked();
-  const state = document.getElementById("activityLockState");
-  if(state){
-    state.textContent = locked ? "현재 상태: 학생 입력 잠금" : "현재 상태: 학생 입력 열림";
-    state.classList.toggle("is-closed", locked);
-  }
-  const closeBtn = document.getElementById("activityLockCloseBtn");
-  const openBtn = document.getElementById("activityLockOpenBtn");
-  if(closeBtn) closeBtn.disabled = locked;
-  if(openBtn) openBtn.disabled = !locked;
-}
-function setActivityInputLocked(flag){
-  setActivitySettings({ inputLocked:!!flag });
-  try { toast(flag ? "학생 입력을 잠갔습니다." : "학생 입력을 열었습니다."); } catch(_) {}
-  try { renderTeacherActivity(); } catch(_) {}
-}
-
 /* === Activity (Morning/Reading) === */
 function getDailyActivity(){
   return readJSON(LS.activityDaily, {});
@@ -3420,7 +3373,7 @@ function renderStudentActivity(){
   // morning buttons
   const mDoneBtn = $("#studentMorningDoneBtn");
   const mCancelBtn = $("#studentMorningCancelBtn");
-  const locked = isActivityInputLocked();
+  const locked = (kstHour() >= 17);
   if (mDoneBtn) {
     mDoneBtn.disabled = !!rec.morning || locked;
     mDoneBtn.classList.toggle('success', !!rec.morning);
@@ -3506,12 +3459,11 @@ function renderStudentActivity(){
   }
 
   const hint = $("#studentReadingSavedHint");
-  if (hint) hint.textContent = locked ? "교사 입력 잠금 중" : "입력하면 자동 저장됩니다.";
+  if (hint && locked) hint.textContent = "17:00 이후 입력 잠금";
 }
 
 
 function renderTeacherActivity(){
-  renderActivityLockControl();
   const today = todayKey();
   const label = $("#activityTodayLabel");
   if (label) label.textContent = `기준 날짜: ${today}`;
@@ -4524,10 +4476,8 @@ function bind() {
   $("#closePinResetModalBtn")?.addEventListener("click", closePinResetModal);
   $("#savePinResetBtn")?.addEventListener("click", savePinReset);
   $("#pinResetModal")?.addEventListener("click", (e)=>{ if (e.target.id==="pinResetModal") closePinResetModal(); });
-  $("#activityLockCloseBtn")?.addEventListener("click", ()=> setActivityInputLocked(true));
-  $("#activityLockOpenBtn")?.addEventListener("click", ()=> setActivityInputLocked(false));
 
-  // Morning study (teacher lock ON/OFF)
+  // Morning study (17:00 lock)
   $("#studentMorningDoneBtn")?.addEventListener("click", ()=> setMorning(true));
   $("#studentMorningCancelBtn")?.addEventListener("click", ()=> setMorning(false));
 
@@ -6360,7 +6310,7 @@ if(j.id==="timekeeper"){
     panel.appendChild(tableWrap);
 
     const note = el("div","weather-note");
-    note.textContent = "오늘 지급 요청을 확인할 수 있어요.";
+    note.textContent = "오늘까지 최대 30건까지 지급 요청이 생성돼요.";
     panel.appendChild(note);
 
     card.appendChild(panel);
@@ -6375,7 +6325,7 @@ if(j.id==="timekeeper"){
 
     const rerender = ()=>{
       const closed = lmIsClosed();
-      cnt.textContent = `오늘 신청 ${shopGetTodayCount()}건`;
+      cnt.textContent = `오늘 신청 ${Math.min(shopGetTodayCount(),30)}/30`;
       lockBadge.classList.toggle("hidden", !closed);
       card.classList.toggle("locked", !!closed);
 
@@ -7312,7 +7262,7 @@ if(j.id==="timekeeper"){
     panel.appendChild(tableWrap);
 
     const note = el("div","weather-note");
-    note.textContent = "오늘 지급 요청을 확인할 수 있어요.";
+    note.textContent = "오늘까지 최대 30건까지 지급 요청이 생성돼요.";
     panel.appendChild(note);
 
     card.appendChild(panel);
@@ -7327,7 +7277,7 @@ if(j.id==="timekeeper"){
 
     const rerender = ()=>{
       const closed = lmIsClosed();
-      cnt.textContent = `오늘 신청 ${shopGetTodayCount()}건`;
+      cnt.textContent = `오늘 신청 ${Math.min(shopGetTodayCount(),30)}/30`;
       lockBadge.classList.toggle("hidden", !closed);
       card.classList.toggle("locked", !!closed);
 
@@ -10656,8 +10606,28 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  Promise.all([loadTeacherAuthFromFirestore(), loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
-    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
+  runMidnightResetIfNeeded();
+  scheduleMidnightResetTick();
+  // rule: always intro on load
+  session.teacherAuthed = false;
+  session.studentId = null;
+
+  // 중요: 로그인 입력창과 기본 버튼은 Firestore 전체 로딩을 기다리지 않고 즉시 작동해야 함.
+  // 서버 동기화가 느려도 ID/PIN 입력이 멈추지 않도록 먼저 바인딩하고 첫 화면을 그림.
+  bind();
+  forceIntro();
+
+  Promise.allSettled([
+    loadTeacherAuthFromFirestore(),
+    loadStudentsFromFirestore(),
+    loadPenaltyLogsFromFirestore(),
+    loadShopStateFromFirestore(),
+    loadJobStateFromFirestore(),
+    loadConstitutionFromFirestore(),
+    loadThermoFromFirestore(),
+    loadActivityStateFromFirestore()
+  ]).then(() => {
+    // Firestore 로딩은 뒤에서 완료되면 현재 화면만 조용히 최신화함.
     try {
       sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
@@ -10667,14 +10637,6 @@ document.addEventListener("DOMContentLoaded", () => {
       installSebitRealtimeCostGuard();
     } catch (_) {}
   });
-  runMidnightResetIfNeeded();
-  scheduleMidnightResetTick();
-  // rule: always intro on load
-  session.teacherAuthed = false;
-  session.studentId = null;
-
-  bind();
-  forceIntro();
 });
 
 function wireCalendarUI(){
@@ -12293,72 +12255,4 @@ function closeStudentShopPreviewModal(){
       window.__sebitStudentShopPurchaseBusy = false;
     }, 2200);
   }, true);
-})();
-
-
-
-
-/* === SEBIT PATCH: robust student shop buy click 2026-05-11 ===
-   iPad에서 직접 바인딩된 클릭 핸들러가 리렌더로 사라지거나, button 기본 동작이 꼬이는 상황을 막기 위한 위임 핸들러입니다.
-*/
-(function installSebitRobustShopBuyClick(){
-  if(window.__sebitRobustShopBuyClickInstalled) return;
-  window.__sebitRobustShopBuyClickInstalled = true;
-  document.addEventListener("click", function(e){
-    try{
-      if(String(document.body.getAttribute("data-page") || "") !== "student-shop") return;
-      const btn = e.target && e.target.closest ? e.target.closest("button.lightshop-buy") : null;
-      const grid = document.getElementById("studentShopGrid");
-      if(!btn || !grid || !grid.contains(btn)) return;
-      if(btn.disabled) return;
-      const productId = btn.getAttribute("data-product-id");
-      if(!productId) return;
-      e.preventDefault();
-      if(typeof sebitHoldRealtimeRender === "function") sebitHoldRealtimeRender(2200);
-      if(typeof openPurchaseConfirm === "function") openPurchaseConfirm(productId);
-    }catch(err){ console.warn("[SEBIT SHOP] delegated buy click skipped", err); }
-  }, true);
-})();
-
-/* === SEBIT cloud strict patch 2026-05-11 ===
-   목적: iPad 입력이 localStorage에만 머물지 않도록 학생/벌점/상점 핵심 저장을 Firestore에 즉시 반영.
-*/
-(function installSebitCloudStrictPatch(){
-  if(window.__sebitCloudStrictPatchInstalled) return;
-  window.__sebitCloudStrictPatchInstalled = true;
-  const flush = function(key){
-    try{
-      const k = String(key || "");
-      if(typeof LS !== "undefined" && k === LS.students && typeof syncStudentsToFirestoreNow === "function") {
-        setTimeout(syncStudentsToFirestoreNow, 0);
-      }
-      if(typeof LS_KEYS !== "undefined" && k === LS_KEYS.penaltyStore && typeof syncPenaltyLogsToFirestoreNow === "function") {
-        setTimeout(syncPenaltyLogsToFirestoreNow, 0);
-      }
-      if(typeof fsShopKeyNameFromLSKey === "function" && fsShopKeyNameFromLSKey(k) && typeof syncShopStateToFirestoreNow === "function") {
-        setTimeout(syncShopStateToFirestoreNow, 0);
-      }
-      if(typeof fsActivityKeyNameFromLSKey === "function" && fsActivityKeyNameFromLSKey(k) && typeof syncActivityStateToFirestoreNow === "function") {
-        setTimeout(syncActivityStateToFirestoreNow, 0);
-      }
-    }catch(err){ console.warn("[SEBIT CLOUD STRICT] flush skipped", err); }
-  };
-  const prevSet = Storage.prototype.setItem;
-  const prevRemove = Storage.prototype.removeItem;
-  Storage.prototype.setItem = function(key, value){
-    const ret = prevSet.apply(this, arguments);
-    if(this === window.localStorage) flush(key);
-    return ret;
-  };
-  Storage.prototype.removeItem = function(key){
-    const ret = prevRemove.apply(this, arguments);
-    if(this === window.localStorage) flush(key);
-    return ret;
-  };
-  window.addEventListener("online", function(){
-    try{ if(typeof syncStudentsToFirestoreNow === "function") syncStudentsToFirestoreNow(); }catch(_){}
-    try{ if(typeof syncPenaltyLogsToFirestoreNow === "function") syncPenaltyLogsToFirestoreNow(); }catch(_){}
-    try{ if(typeof syncShopStateToFirestoreNow === "function") syncShopStateToFirestoreNow(); }catch(_){}
-    try{ if(typeof syncActivityStateToFirestoreNow === "function") syncActivityStateToFirestoreNow(); }catch(_){}
-  });
 })();
