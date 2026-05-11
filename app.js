@@ -1,97 +1,17 @@
-
-/* === SEBIT PATCH: realtime safe render guard ===
-   실시간 동기화는 유지하되, 사용자가 입력/클릭/모달 작업 중일 때
-   화면 전체 리렌더만 잠시 늦춰서 입력 지워짐·버튼 무반응·펼침 닫힘을 줄임.
-   index.html 수정 없음.
+/* === SEBIT EMERGENCY LOGIN REPAIR ===
+   로그인/인트로 화면에서는 실시간 리렌더를 절대 실행하지 않음.
+   입력·클릭 감시 리스너를 제거하여 iPad 입력 지연/튕김을 막음.
 */
-window.__sebitSafeRenderHoldUntil = window.__sebitSafeRenderHoldUntil || 0;
-window.__sebitSafeRenderBusy = window.__sebitSafeRenderBusy || false;
-window.__sebitPendingRealtimeRefresh = window.__sebitPendingRealtimeRefresh || false;
-
-function sebitHoldRealtimeRender(ms){
-  window.__sebitSafeRenderHoldUntil = Math.max(
-    window.__sebitSafeRenderHoldUntil || 0,
-    Date.now() + (Number(ms) || 1500)
-  );
-}
-
-function sebitIsUserEditingNow(){
-  try{
-    const el = document.activeElement;
-    if(!el) return false;
-    const tag = String(el.tagName || "").toLowerCase();
-    if(tag === "input" || tag === "textarea" || tag === "select") return true;
-    if(el.isContentEditable) return true;
-  }catch(_){}
-  return false;
-}
-
-function sebitIsModalOpenNow(){
-  try{
-    return !!document.querySelector(".modal:not(.hidden), .drawer:not(.hidden), #adminModal:not(.hidden), .admin-modal:not(.hidden)");
-  }catch(_){ return false; }
-}
-
-function sebitIsSensitivePageNow(){
-  const page = String(document.body.getAttribute("data-page") || "");
-  // 학생 입력/상점/포켓/직업 화면, 교사 활동기록/학생관리 화면은 작업 중 리렌더에 취약
-  return page === "student-shop" ||
-         page === "student-pocket" ||
-         page === "student-home" ||
-         page === "student-jobstatus" ||
-         page === "teacher-activity" ||
-         page === "teacher-students";
-}
-
-function sebitShouldDelayRealtimeRender(){
-  if(window.__sebitSafeRenderBusy) return true;
-  if(Date.now() < (window.__sebitSafeRenderHoldUntil || 0)) return true;
-  if(sebitIsUserEditingNow()) return true;
-  if(sebitIsModalOpenNow()) return true;
-  return false;
-}
-
+function sebitHoldRealtimeRender(ms){ /* no-op: login stability */ }
+function sebitShouldDelayRealtimeRender(){ return false; }
 function sebitRunRealtimeRefreshSafely(callback){
   try{
     if(typeof callback !== "function") return;
-    if(sebitIsSensitivePageNow() && sebitShouldDelayRealtimeRender()){
-      window.__sebitPendingRealtimeRefresh = true;
-      clearTimeout(window.__sebitPendingRealtimeRefreshTimer);
-      window.__sebitPendingRealtimeRefreshTimer = setTimeout(function(){
-        try{
-          if(sebitShouldDelayRealtimeRender()){
-            sebitRunRealtimeRefreshSafely(callback);
-            return;
-          }
-          window.__sebitPendingRealtimeRefresh = false;
-          callback();
-        }catch(err){ console.warn("[SEBIT PATCH] delayed refresh failed", err); }
-      }, 700);
-      return;
-    }
+    const page = String(document.body && document.body.getAttribute("data-page") || "");
+    if(page === "intro" || page === "teacher-login" || page === "student-login") return;
     callback();
-  }catch(err){
-    console.warn("[SEBIT PATCH] safe refresh failed", err);
-  }
+  }catch(err){ console.warn("[SEBIT] realtime refresh skipped", err); }
 }
-
-(function installSebitRealtimeInteractionGuard(){
-  if(window.__sebitRealtimeInteractionGuardInstalled) return;
-  window.__sebitRealtimeInteractionGuardInstalled = true;
-
-  ["keydown", "input", "compositionstart", "compositionupdate", "touchstart", "pointerdown", "mousedown", "click"].forEach(function(type){
-    document.addEventListener(type, function(e){
-      try{
-        const page = String(document.body.getAttribute("data-page") || "");
-        const target = e.target;
-        const editing = target && target.closest && target.closest("input, textarea, select, [contenteditable='true']");
-        const button = target && target.closest && target.closest("button, [role='button'], .btn, .chip, .menuBtn, .lightshop-tab");
-        if(editing) sebitHoldRealtimeRender(1800);
-        if(button && (page.startsWith("student-") || page.startsWith("teacher-"))) sebitHoldRealtimeRender(1400);
-      }catch(_){}
-    }, true);
-  });
-})();
 
 // Firebase 연결은 index.html의 compat script에서 처리함 (iPad Safari 호환)
 // 기존 modular 코드 형태를 유지하기 위한 compat 래퍼
@@ -1566,7 +1486,15 @@ async function saveTeacherAuthToFirestore({ password, masterCodeHash } = {}){
 }
 async function checkTeacherPassword(raw){
   const pw = String(raw || "").trim();
-  const auth = await loadTeacherAuthFromFirestore();
+  // 로그인 화면이 오래 멈추지 않도록 Firestore 확인에 짧은 제한 시간을 둠.
+  // 서버 응답이 오면 서버 비번을 우선 사용하고, 실패/지연 시 기존 로컬/기본값으로 긴급 로그인 가능하게 함.
+  let auth = null;
+  try{
+    auth = await Promise.race([
+      loadTeacherAuthFromFirestore(),
+      new Promise(resolve => setTimeout(()=>resolve(null), 2500))
+    ]);
+  }catch(_){ auth = null; }
   if(auth?.passwordHash) return sebitSimpleHash(pw) === String(auth.passwordHash);
   return pw === String(localStorage.getItem(LS.teacherPw) || DEFAULT_TEACHER_PW);
 }
@@ -2039,9 +1967,9 @@ const cards = filtered.map(p=>{
     const effPrice = getEffectivePrice(p, deal);
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
-    // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
-    const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
-    const disabled = (isSoldOut || isStopped);
+    const closed = shopIsClosed();
+    const state = closed ? "마감" : (isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중"));
+    const disabled = (isSoldOut || isStopped || closed);
 
 
     const wrap = document.createElement("div");
@@ -2095,7 +2023,11 @@ function openPurchaseConfirm(productId){
   const items = getMyPocketItems(me.id);
   const total = pocketTotalCount(items);
 
-  // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
+  if(shopIsClosed()){
+    toast("오늘 상품 지급 신청이 마감되었어요.");
+    return;
+  }
+
   if(isStopped){ toast("판매중단 상품입니다"); return; }
   if(stock <= 0){ toast("품절 상품입니다"); return; }
   if(Math.max(0, Number(me.lumen||0)) < price){ toast("루멘이 부족해요"); return; }
@@ -2184,7 +2116,10 @@ function shopTryPurchase(productId){
   const total = pocketTotalCount(items);
   if(total >= 10){ toast("라이트 포켓이 가득 찼어요(10개)"); return; }
 
-  // 30건 제한은 구매가 아니라 라이트 포켓의 '지급 요청'에만 적용함.
+  if(shopIsClosed()){
+    toast("오늘 상품 지급 신청이 마감되었어요.");
+    return;
+  }
 
   // 1) 학생 루멘 차감
   const students = readJSON(LS.students, []);
@@ -2226,9 +2161,6 @@ setMyPocketItems(me.id, items);
   writeJSON(LS.shopPurchaseLog, logs);
 
   // 지급요청(선착순 30건) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
-  // 구매 직후에는 지연 타이머만 기다리지 않고 핵심 데이터를 즉시 서버 반영 시도함.
-  try { syncOneStudentToFirestoreNow(students[sidx] || me); } catch(_) {}
-  try { syncShopStateToFirestoreNow(); } catch(_) {}
   toast("구매 완료!");
   // UI 갱신
   renderStudentShop();
@@ -10606,28 +10538,8 @@ function installSebitRealtimeCostGuard(){
 
 document.addEventListener("DOMContentLoaded", () => {
   ensureSeed();
-  runMidnightResetIfNeeded();
-  scheduleMidnightResetTick();
-  // rule: always intro on load
-  session.teacherAuthed = false;
-  session.studentId = null;
-
-  // 중요: 로그인 입력창과 기본 버튼은 Firestore 전체 로딩을 기다리지 않고 즉시 작동해야 함.
-  // 서버 동기화가 느려도 ID/PIN 입력이 멈추지 않도록 먼저 바인딩하고 첫 화면을 그림.
-  bind();
-  forceIntro();
-
-  Promise.allSettled([
-    loadTeacherAuthFromFirestore(),
-    loadStudentsFromFirestore(),
-    loadPenaltyLogsFromFirestore(),
-    loadShopStateFromFirestore(),
-    loadJobStateFromFirestore(),
-    loadConstitutionFromFirestore(),
-    loadThermoFromFirestore(),
-    loadActivityStateFromFirestore()
-  ]).then(() => {
-    // Firestore 로딩은 뒤에서 완료되면 현재 화면만 조용히 최신화함.
+  Promise.all([loadTeacherAuthFromFirestore(), loadStudentsFromFirestore(), loadPenaltyLogsFromFirestore(), loadShopStateFromFirestore(), loadJobStateFromFirestore(), loadConstitutionFromFirestore(), loadThermoFromFirestore(), loadActivityStateFromFirestore()]).then(() => {
+    // Firestore에서 학생명단/루멘/XP/벌점/상점·포켓/직업/활동기록을 가져온 뒤 현재 화면이 관련 화면이면 다시 그림
     try {
       sanitizeAllPockets();
       const page = String(document.body.getAttribute("data-page") || "");
@@ -10637,6 +10549,14 @@ document.addEventListener("DOMContentLoaded", () => {
       installSebitRealtimeCostGuard();
     } catch (_) {}
   });
+  runMidnightResetIfNeeded();
+  scheduleMidnightResetTick();
+  // rule: always intro on load
+  session.teacherAuthed = false;
+  session.studentId = null;
+
+  bind();
+  forceIntro();
 });
 
 function wireCalendarUI(){
