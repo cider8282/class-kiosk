@@ -95,10 +95,20 @@ function sebitRunRealtimeRefreshSafely(callback){
 
 // Firebase 연결은 index.html의 compat script에서 처리함 (iPad Safari 호환)
 // 기존 modular 코드 형태를 유지하기 위한 compat 래퍼
+function sebitEnsureDbReady(){
+  if (typeof db === "undefined" || !db || typeof db.collection !== "function") {
+    const err = window.__sebitFirebaseError || new Error("Firestore db is not ready");
+    console.error("[SEBIT] Firestore is not connected. Check Firebase script/config in index.html.", err);
+    throw err;
+  }
+  return db;
+}
 function collection(dbObj, collectionName){
+  dbObj = dbObj || sebitEnsureDbReady();
   return dbObj.collection(collectionName);
 }
 function doc(dbObj, collectionName, docId){
+  dbObj = dbObj || sebitEnsureDbReady();
   return dbObj.collection(collectionName).doc(docId);
 }
 async function getDocs(collectionRef){
@@ -109,6 +119,7 @@ async function getDocs(collectionRef){
   };
 }
 function writeBatch(dbObj){
+  dbObj = dbObj || sebitEnsureDbReady();
   const batch = dbObj.batch();
   return {
     set: (ref, data, options) => batch.set(ref, data, options),
@@ -217,7 +228,7 @@ function startConstitutionFirestoreRealtimeSync(){
       console.log("[SEBIT] constitution realtime updated");
       refreshConstitutionViewsFromRealtime();
     }, (err)=>{ console.error("[SEBIT] constitution realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] constitution realtime listener failed", err); }
+  }catch(err){ __sebitConstitutionRealtimeStarted = false; console.error("[SEBIT] constitution realtime listener failed", err); }
 }
 
 /* === Firestore sync: students + lumen/xp (1단계) ===
@@ -440,7 +451,7 @@ function startFirestoreRealtimeSync(){
         refreshCurrentSebitPageFromRealtime();
       }
     }, (err)=>{ console.error("[SEBIT] students realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] students realtime listener failed", err); }
+  }catch(err){ __sebitRealtimeStarted = false; console.error("[SEBIT] students realtime listener failed", err); }
 
   try{
     __sebitUnsubPenaltyLogs = onSnapshot(collection(db, FS_COLLECTIONS.penaltyLogs), (snap)=>{
@@ -457,7 +468,7 @@ function startFirestoreRealtimeSync(){
       console.log("[SEBIT] penaltyLogs realtime updated", fromCloud.length);
       refreshCurrentSebitPageFromRealtime();
     }, (err)=>{ console.error("[SEBIT] penaltyLogs realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] penaltyLogs realtime listener failed", err); }
+  }catch(err){ __sebitRealtimeStarted = false; console.error("[SEBIT] penaltyLogs realtime listener failed", err); }
 }
 
 /* === Firestore sync: shop + light pocket (3단계) ===
@@ -609,7 +620,7 @@ function startShopFirestoreRealtimeSync(){
         }
       }, (err)=>{ console.error("[SEBIT] shop doc realtime sync failed", name, err); });
     });
-  }catch(err){ console.error("[SEBIT] shop doc realtime listener failed", err); }
+  }catch(err){ __sebitShopRealtimeStarted = false; console.error("[SEBIT] shop doc realtime listener failed", err); }
 }
 
 
@@ -775,7 +786,7 @@ function startJobFirestoreRealtimeSync(){
         refreshJobPagesFromRealtime();
       }
     }, (err)=>{ console.error("[SEBIT] job state realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] job realtime listener failed", err); }
+  }catch(err){ __sebitJobRealtimeStarted = false; console.error("[SEBIT] job realtime listener failed", err); }
 }
 
 /* localStorage 직접 저장도 Firestore에 반영되게 감지함 */
@@ -1194,7 +1205,7 @@ function startActivityFirestoreRealtimeSync(){
         refreshActivityPagesFromRealtime();
       }
     }, (err)=>{ console.error("[SEBIT] activity state realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] activity realtime listener failed", err); }
+  }catch(err){ __sebitActivityRealtimeStarted = false; console.error("[SEBIT] activity realtime listener failed", err); }
 }
 
 /* === Firestore sync: class thermometer / donations (final) ===
@@ -1277,7 +1288,7 @@ function startThermoFirestoreRealtimeSync(){
       console.log("[SEBIT] thermo realtime updated", value.now);
       refreshThermoViewsFromRealtime();
     }, (err)=>{ console.error("[SEBIT] thermo realtime sync failed", err); });
-  }catch(err){ console.error("[SEBIT] thermo realtime listener failed", err); }
+  }catch(err){ __sebitThermoRealtimeStarted = false; console.error("[SEBIT] thermo realtime listener failed", err); }
 }
 
 

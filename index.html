@@ -5,6 +5,44 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
   <title>SEBIT Light World</title>
   <link rel="stylesheet" href="style.css"/>
+  <!-- Firebase / Firestore realtime sync (iPad Safari compatible: compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script>
+    // SEBIT cloud sync: all teacher PCs and student tablets must use this same project.
+    var db = null;
+    window.__sebitFirebaseReady = false;
+    window.__sebitFirebaseError = null;
+
+    (function initSebitFirebase(){
+      try {
+        const firebaseConfig = {
+          apiKey: "AIzaSyCKcYXyywiJuThbboYZDtHSbmhwGyj5Vpo",
+          authDomain: "sebit-class-2026.firebaseapp.com",
+          projectId: "sebit-class-2026",
+          storageBucket: "sebit-class-2026.firebasestorage.app",
+          messagingSenderId: "255915011407",
+          appId: "1:255915011407:web:e38e2dccc175226a9da93a"
+        };
+
+        if (!window.firebase || !firebase.initializeApp || !firebase.firestore) {
+          throw new Error("Firebase SDK load failed");
+        }
+
+        if (!firebase.apps || !firebase.apps.length) {
+          firebase.initializeApp(firebaseConfig);
+        }
+
+        db = firebase.firestore();
+        window.db = db;
+        window.__sebitFirebaseReady = true;
+        console.log("[SEBIT] Firebase connected: sebit-class-2026");
+      } catch (err) {
+        window.__sebitFirebaseError = err;
+        console.error("[SEBIT] Firebase connection failed. Realtime sync will not work until this is fixed.", err);
+      }
+    })();
+  </script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -213,7 +251,7 @@
           </div>
 
           <footer class="footnote">
-            <span>정적 사이트 · localStorage 저장</span>
+            <span>정적 사이트 · Firestore 실시간 동기화</span>
             <span class="dot">•</span>
             <span>하루 기록은 0시 기준 초기화</span>
           </footer>
@@ -1069,7 +1107,6 @@
 
   
 
-<script src="inject_activity_dummy.js"></script>
 
     <!-- MODAL: QUEST VIEW (학생/교사 공용 보기) -->
     <div class="modal quest-modal hidden" id="questViewModal" role="dialog" aria-modal="true" aria-label="퀘스트 보기">
