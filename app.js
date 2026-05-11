@@ -1822,11 +1822,7 @@ function renderStudentPocket(){
     const btn = wrap.querySelector("button");
     if(btn && !requesting){
       btn.addEventListener("click", ()=>{
-        // 지급 요청 개수 제한 없음
-        if(shopIsClosed()){
-          toast("오늘 상품 지급 신청이 마감되었어요.");
-          return;
-        }
+        // 30건 제한 제거: 지급 요청은 제한 없이 생성
         // 요청 생성(빛의 상인 체크리스트 연동)
         const req = {
           id: "lm_"+Date.now()+"_"+Math.random().toString(16).slice(2),
@@ -1844,7 +1840,7 @@ function renderStudentPocket(){
         const list = lmGetTodayList();
         list.push(req);
         lmSetTodayList(list);
-        shopIncTodayCount(); // '지급 요청' 기준으로 카운트 증가
+        // 30건 제한 제거: 별도 신청 카운트 증가 없음
         it.status = "requested";
         it.requesting = true;
         it.requestedAt = Date.now();
@@ -1878,19 +1874,17 @@ function shopTodayKey(){
   return new Date().toISOString().slice(0,10);
 }
 function shopGetTodayCount(){
-  const obj = readJSON(LS.shopDailyCounter, {});
-  const key = shopTodayKey();
-  const n = Math.max(0, Number(obj?.[key]||0));
-  return n;
+  // 30건 제한 제거: 화면 표시용으로 오늘 생성된 지급 요청 수만 계산
+  try{
+    const list = lmGetTodayList();
+    return Array.isArray(list) ? list.length : 0;
+  }catch(_){ return 0; }
 }
 function shopIncTodayCount(){
-  const obj = readJSON(LS.shopDailyCounter, {});
-  const key = shopTodayKey();
-  obj[key] = Math.max(0, Number(obj?.[key]||0)) + 1;
-  writeJSON(LS.shopDailyCounter, obj);
+  // 30건 제한 제거: 더 이상 카운터를 증가시키지 않음
 }
 function shopIsClosed(){
-  // 지급 요청/구매 개수 제한 제거
+  // 30건 제한 제거: 자동 마감 없음
   return false;
 }
 
@@ -2054,8 +2048,8 @@ const cards = filtered.map(p=>{
     const effPrice = getEffectivePrice(p, deal);
     const isSoldOut = (p.stock||0) <= 0;
     const isStopped = p.isPublished === false;
-    // 구매와 지급 요청 모두 개수 제한 없음.
-    // 기존 30건 제한 문구와 disabled 조건을 제거했습니다.
+    // 구매는 라이트 포켓의 "지급 요청 30건 마감"과 별개입니다.
+    // 기존에는 shopIsClosed()가 구매 버튼까지 disabled 처리해서, 지급 요청이 30건이면 구매 자체가 막히는 문제가 있었습니다.
     const state = isSoldOut ? "품절" : (isStopped ? "판매중단" : "판매중");
     const disabled = (isSoldOut || isStopped);
 
@@ -2244,7 +2238,7 @@ setMyPocketItems(me.id, items);
   writeJSON(LS.shopPurchaseLog, logs);
   try { syncShopStateToFirestoreNow(); } catch(_) {}
 
-  // 지급요청 카운트는 기록용으로만 증가
+  // 지급요청(지급 요청) 카운트는 '라이트 포켓 > 지급 요청'에서만 증가
   toast("구매 완료!");
   // UI 갱신
   renderStudentShop();
@@ -6366,7 +6360,7 @@ if(j.id==="timekeeper"){
     panel.appendChild(tableWrap);
 
     const note = el("div","weather-note");
-    note.textContent = "지급 요청 개수 제한 없이 사용할 수 있어요.";
+    note.textContent = "오늘 지급 요청을 확인할 수 있어요.";
     panel.appendChild(note);
 
     card.appendChild(panel);
@@ -7318,7 +7312,7 @@ if(j.id==="timekeeper"){
     panel.appendChild(tableWrap);
 
     const note = el("div","weather-note");
-    note.textContent = "지급 요청 개수 제한 없이 사용할 수 있어요.";
+    note.textContent = "오늘 지급 요청을 확인할 수 있어요.";
     panel.appendChild(note);
 
     card.appendChild(panel);
