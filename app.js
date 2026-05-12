@@ -13096,7 +13096,7 @@ function closeStudentShopPreviewModal(){
       meta.appendChild(priceDiv); meta.appendChild(stockDiv); meta.appendChild(catDiv); wrap.appendChild(meta);
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'btn wide sebit-shop-buy-server-first';
+      btn.className = 'btn wide lightshop-buy sebit-shop-buy-server-first';
       btn.textContent = isSoldOut ? '품절' : '구매';
       btn.disabled = isSoldOut;
       btn.setAttribute('data-sebit-purchase-id', String(p.id || ''));
@@ -13119,4 +13119,88 @@ function closeStudentShopPreviewModal(){
   }, true);
 
   try{ if(document.body && document.body.getAttribute('data-page') === 'student-shop') renderStudentShop(); }catch(_){ }
+})();
+
+
+/* =========================================================
+   SEBIT SHOP IPAD TAP FIX 2026-05-12
+   목적:
+   - PC click은 되지만 iPad/패드 touch에서 구매 버튼이 무반응인 문제 보완
+   - window capture 단계에서 pointerup/touchend/click을 먼저 잡아 기존 하위 리스너 충돌을 차단
+   - data-sebit-purchase-id 새 버튼과 data-shop-buy 기존 버튼을 모두 지원
+   ========================================================= */
+(function(){
+  if(window.__sebitShopIpadTapFixV2) return;
+  window.__sebitShopIpadTapFixV2 = true;
+
+  let lastKey = '';
+  let lastAt = 0;
+
+  function isStudentShopPage(){
+    try{ return String(document.body && document.body.getAttribute('data-page') || '') === 'student-shop'; }
+    catch(_){ return false; }
+  }
+
+  function findBuyButton(target){
+    if(!target || !target.closest) return null;
+    return target.closest('[data-sebit-purchase-id], [data-shop-buy], button.sebit-shop-buy-server-first, button.lightshop-buy');
+  }
+
+  function productIdFromButton(btn){
+    if(!btn) return '';
+    return String(btn.getAttribute('data-sebit-purchase-id') || btn.getAttribute('data-shop-buy') || '').trim();
+  }
+
+  function blockEvent(e){
+    try{ e.preventDefault && e.preventDefault(); }catch(_){ }
+    try{ e.stopPropagation && e.stopPropagation(); }catch(_){ }
+    try{ e.stopImmediatePropagation && e.stopImmediatePropagation(); }catch(_){ }
+  }
+
+  function runBuy(e){
+    const btn = findBuyButton(e && e.target);
+    if(!btn) return;
+    if(!isStudentShopPage()) return;
+
+    const pid = productIdFromButton(btn);
+    if(!pid) return;
+
+    blockEvent(e);
+
+    if(btn.disabled || btn.getAttribute('aria-disabled') === 'true'){
+      try{ toast('구매할 수 없는 상품입니다.'); }catch(_){ alert('구매할 수 없는 상품입니다.'); }
+      return;
+    }
+
+    const now = Date.now();
+    const key = pid + ':' + (e && e.type || 'event');
+    // touchend 뒤 synthetic click, pointerup 뒤 click이 이어지는 경우를 한 번만 처리
+    if(lastKey && lastKey.indexOf(pid + ':') === 0 && now - lastAt < 900){
+      return;
+    }
+    lastKey = key;
+    lastAt = now;
+
+    try{ btn.dataset.sebitProcessing = '1'; }catch(_){ }
+    setTimeout(function(){ try{ delete btn.dataset.sebitProcessing; }catch(_){ } }, 1600);
+
+    if(typeof window.sebitDirectShopBuy === 'function'){
+      window.sebitDirectShopBuy(e, pid);
+      return;
+    }
+    if(typeof window.openPurchaseConfirm === 'function'){
+      window.openPurchaseConfirm(pid);
+      return;
+    }
+    if(typeof window.shopTryPurchase === 'function'){
+      window.shopTryPurchase(pid);
+      return;
+    }
+    try{ toast('구매 기능을 다시 불러와 주세요.'); }catch(_){ alert('구매 기능을 다시 불러와 주세요.'); }
+  }
+
+  // window capture가 document/button capture보다 먼저 실행되어 iPad에서 무반응을 줄임.
+  window.addEventListener('pointerup', runBuy, {capture:true, passive:false});
+  window.addEventListener('touchend', runBuy, {capture:true, passive:false});
+  window.addEventListener('click', runBuy, {capture:true, passive:false});
 })();

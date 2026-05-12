@@ -3418,3 +3418,24 @@ body[data-page="student-shop"] .lightshop-buy[data-sebit-processing="1"]{
   opacity: .65 !important;
   pointer-events: none !important;
 }
+
+
+/* === SEBIT SHOP IPAD TAP FIX 2026-05-12 ===
+   server-first 구매 버튼에도 기존 lightshop-buy 터치 보정과 같은 z-index/pointer 보정을 적용
+*/
+body[data-page="student-shop"] .sebit-shop-buy-server-first,
+body[data-page="student-shop"] [data-sebit-purchase-id]{
+  position: relative !important;
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  -webkit-tap-highlight-color: rgba(0,0,0,.22) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body[data-page="student-shop"] .sebit-shop-buy-server-first[data-sebit-processing="1"],
+body[data-page="student-shop"] [data-sebit-purchase-id][data-sebit-processing="1"]{
+  opacity: .65 !important;
+  pointer-events: none !important;
+}
