@@ -12416,3 +12416,379 @@ function closeStudentShopPreviewModal(){
     }
   }, true);
 })();
+
+
+/* =========================================================
+   SEBIT SHOP SYSTEM REBUILD FINAL 2026-05-12
+   현재 상점 오류의 핵심을 한 번에 정리:
+   1) 학생 상점 구매 버튼을 disabled/inline onclick/기존 모달에 의존하지 않음
+   2) 구매 확인은 iPad에서도 확실한 window.confirm 사용
+   3) 구매 성공 시 즉시 루멘 차감 + 재고 차감 + 라이트 포켓 신청중 추가 + 빛의 상인 지급 요청 생성
+   4) Firestore transaction을 우선 사용하여 PC/패드가 같은 서버 값을 기준으로 처리
+   5) 실패 시에는 localStorage fallback으로 로그인/수업 중 사용 자체가 멈추지 않게 함
+   ========================================================= */
+(function(){
+  if(window.__sebitShopSystemRebuildFinal) return;
+  window.__sebitShopSystemRebuildFinal = true;
+
+  function sid(){ return String((window.session && session.studentId) || '').trim(); }
+  function safeId(prefix){
+    try{ if(window.crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); }catch(_){ }
+    return String(prefix||'id') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,10);
+  }
+  // 일부 iPad/Safari 대비: 기존 코드의 crypto.randomUUID 직접 호출도 죽지 않게 보강
+  try{
+    if(!window.crypto) window.crypto = {};
+    if(typeof window.crypto.randomUUID !== 'function') window.crypto.randomUUID = function(){ return safeId('uuid'); };
+  }catch(_){ }
+
+  function getStudents(){ const a = readJSON(LS.students, []); return Array.isArray(a) ? a : []; }
+  function setStudents(a){ writeJSON(LS.students, Array.isArray(a) ? a : []); }
+  function getProducts(){
+    const raw = readJSON(LS.shopProducts, []);
+    const arr = Array.isArray(raw) ? raw : [];
+    let changed = false;
+    const fixed = arr.map((p,i)=>{
+      const q = (p && typeof p === 'object') ? {...p} : {};
+      if(!q.id){ q.id = safeId('shop'); changed = true; }
+      q.name = String(q.name || '').trim() || ('상품 ' + (i+1));
+      q.price = Math.max(0, Number(q.price || 0));
+      q.stock = Math.max(0, Number(q.stock || 0));
+      q.category = String(q.category || '간식').trim() || '간식';
+      q.desc = String(q.desc || '');
+      q.imgId = Number.isFinite(Number(q.imgId)) ? Number(q.imgId) : 0;
+      q.isPublished = (q.isPublished === false ? false : true);
+      return q;
+    });
+    if(changed) writeJSON(LS.shopProducts, fixed);
+    return fixed;
+  }
+  function setProducts(a){ writeJSON(LS.shopProducts, Array.isArray(a) ? a : []); }
+  function todayKey(){ try{ return shopUiTodayKey(); }catch(_){ return new Date().toISOString().slice(0,10); } }
+  function getStudentObj(studentId){ return getStudents().find(s => String(s && s.id || '').trim() === String(studentId).trim()) || null; }
+  function getProductObj(productId){ return getProducts().find(p => String(p && p.id || '') === String(productId)) || null; }
+  function pocketAll(){ const v = readJSON(LS.lightPocket, {}); return (v && typeof v === 'object') ? v : {}; }
+  function savePocketAll(v){ writeJSON(LS.lightPocket, (v && typeof v === 'object') ? v : {}); }
+  function requestsAll(){ const v = readJSON(LS.lightMerchantRequests, {}); return (v && typeof v === 'object') ? v : {}; }
+  function saveRequestsAll(v){ writeJSON(LS.lightMerchantRequests, (v && typeof v === 'object') ? v : {}); }
+  function logsAll(){ const v = readJSON(LS.shopPurchaseLog, []); return Array.isArray(v) ? v : []; }
+  function saveLogs(v){ writeJSON(LS.shopPurchaseLog, Array.isArray(v) ? v.slice(-50) : []); }
+  function counterAll(){ const v = readJSON(LS.shopDailyCounter, {}); return (v && typeof v === 'object') ? v : {}; }
+  function saveCounter(v){ writeJSON(LS.shopDailyCounter, (v && typeof v === 'object') ? v : {}); }
+
+  function priceOf(p, products){
+    try{ return Math.max(0, Number(getEffectivePrice(p, getOrMakeDeal(products)))); }catch(_){ return Math.max(0, Number(p && p.price || 0)); }
+  }
+
+  function makePurchasePayload(student, product, price){
+    const now = Date.now();
+    const ymd = todayKey();
+    const pocketId = safeId('pocket');
+    const reqId = 'lm_' + now + '_' + Math.random().toString(16).slice(2);
+    const imgId = Number.isFinite(Number(product.imgId)) ? Number(product.imgId) : 0;
+    const pocketItem = {
+      id: pocketId,
+      productId: String(product.id),
+      name: String(product.name || '상품'),
+      image: String((Number(imgId) % 10) + 1),
+      status: 'requested',
+      requesting: true,
+      purchasedAt: new Date(now).toISOString(),
+      requestedAt: now,
+      requestedYmd: ymd
+    };
+    const request = {
+      id: reqId,
+      ts: now,
+      requestedYmd: ymd,
+      studentId: String(student.id || ''),
+      studentName: String(student.name || ''),
+      productId: String(product.id || ''),
+      pocketItemId: pocketId,
+      productName: String(product.name || '상품'),
+      qty: 1,
+      price: Number(price || 0),
+      memo: '',
+      status: 'pending'
+    };
+    const log = {
+      id: safeId('purchase'),
+      ts: new Date(now).toISOString(),
+      studentId: String(student.id || ''),
+      studentName: String(student.name || ''),
+      student: String(student.name || ''),
+      productId: String(product.id || ''),
+      productName: String(product.name || '상품'),
+      product: String(product.name || '상품'),
+      price: Number(price || 0),
+      status: 'pending'
+    };
+    return { pocketItem, request, log, ymd };
+  }
+
+  function validatePurchase(student, product, price){
+    if(!student) return '다시 로그인해 주세요.';
+    if(!product) return '상품 정보를 찾을 수 없어요. 교사홈에서 상품을 다시 저장해 주세요.';
+    if(product.isPublished === false) return '판매중단 상품입니다.';
+    if(Number(product.stock || 0) <= 0) return '품절 상품입니다.';
+    if(Number(student.lumen || 0) < Number(price || 0)) return '루멘이 부족해요.';
+    const items = getMyPocketItems(String(student.id || ''));
+    if(pocketTotalCount(items) >= 10) return '라이트 포켓이 가득 찼어요(10개).';
+    return '';
+  }
+
+  function applyLocalPurchase(studentId, productId){
+    const students = getStudents();
+    const products = getProducts();
+    const sidx = students.findIndex(s => String(s && s.id || '').trim() === String(studentId).trim());
+    const pidx = products.findIndex(p => String(p && p.id || '') === String(productId));
+    if(sidx < 0 || pidx < 0) throw new Error('local purchase target missing');
+    const student = {...students[sidx]};
+    const product = {...products[pidx]};
+    const price = priceOf(product, products);
+    const reason = validatePurchase(student, product, price);
+    if(reason) throw new Error(reason);
+    const payload = makePurchasePayload(student, product, price);
+
+    student.lumen = Math.max(0, Number(student.lumen || 0) - price);
+    product.stock = Math.max(0, Number(product.stock || 0) - 1);
+    students[sidx] = student;
+    products[pidx] = product;
+    setStudents(students);
+    setProducts(products);
+
+    const pockets = pocketAll();
+    const cur = Array.isArray(pockets[studentId]) ? pockets[studentId] : [];
+    pockets[studentId] = cur.concat([payload.pocketItem]).slice(0,10);
+    savePocketAll(pockets);
+
+    const reqs = requestsAll();
+    const list = Array.isArray(reqs[payload.ymd]) ? reqs[payload.ymd] : [];
+    reqs[payload.ymd] = list.concat([payload.request]);
+    saveRequestsAll(reqs);
+
+    const logs = logsAll();
+    logs.push(payload.log);
+    saveLogs(logs);
+
+    const cnt = counterAll();
+    cnt[payload.ymd] = Math.max(0, Number(cnt[payload.ymd] || 0)) + 1;
+    saveCounter(cnt);
+
+    return {student, product, payload};
+  }
+
+  async function applyCloudPurchase(studentId, productId){
+    if(typeof db === 'undefined' || !db || typeof db.runTransaction !== 'function') throw new Error('Firestore transaction unavailable');
+    let result = null;
+    await db.runTransaction(async function(tx){
+      const studentRef = db.collection('students').doc(fsStudentDocId(studentId));
+      const productsRef = db.collection('sharedState').doc('shopProducts');
+      const pocketRef = db.collection('sharedState').doc('lightPocket');
+      const reqRef = db.collection('sharedState').doc('lightMerchantRequests');
+      const logRef = db.collection('sharedState').doc('shopPurchaseLog');
+      const counterRef = db.collection('sharedState').doc('shopDailyCounter');
+
+      const sSnap = await tx.get(studentRef);
+      const pSnap = await tx.get(productsRef);
+      const pocketSnap = await tx.get(pocketRef);
+      const reqSnap = await tx.get(reqRef);
+      const logSnap = await tx.get(logRef);
+      const counterSnap = await tx.get(counterRef);
+
+      if(!sSnap.exists) throw new Error('학생 정보를 찾을 수 없어요. 다시 로그인해 주세요.');
+      const student = {...(sSnap.data() || {})};
+      student.id = String(student.id || studentId);
+      const products = Array.isArray((pSnap.data() || {}).value) ? (pSnap.data() || {}).value.map(x=>({...x})) : [];
+      const pidx = products.findIndex(p => String(p && p.id || '') === String(productId));
+      if(pidx < 0) throw new Error('상품 정보를 찾을 수 없어요. 교사홈에서 상품을 다시 저장해 주세요.');
+      const product = {...products[pidx]};
+      const price = priceOf(product, products);
+
+      const pockets = (pocketSnap.exists && (pocketSnap.data() || {}).value && typeof (pocketSnap.data() || {}).value === 'object') ? {...(pocketSnap.data() || {}).value} : {};
+      const currentPocket = Array.isArray(pockets[studentId]) ? pockets[studentId].slice() : [];
+      if(currentPocket.filter(it=>it && it.productId).length >= 10) throw new Error('라이트 포켓이 가득 찼어요(10개).');
+      const reason = validatePurchase({...student, id: studentId}, product, price);
+      if(reason && reason !== '라이트 포켓이 가득 찼어요(10개).') throw new Error(reason);
+
+      const payload = makePurchasePayload({...student, id: studentId}, product, price);
+      student.lumen = Math.max(0, Number(student.lumen || 0) - price);
+      product.stock = Math.max(0, Number(product.stock || 0) - 1);
+      products[pidx] = product;
+      pockets[studentId] = currentPocket.concat([payload.pocketItem]).slice(0,10);
+
+      const reqs = (reqSnap.exists && (reqSnap.data() || {}).value && typeof (reqSnap.data() || {}).value === 'object') ? {...(reqSnap.data() || {}).value} : {};
+      const reqList = Array.isArray(reqs[payload.ymd]) ? reqs[payload.ymd].slice() : [];
+      reqs[payload.ymd] = reqList.concat([payload.request]);
+
+      const logs = (logSnap.exists && Array.isArray((logSnap.data() || {}).value)) ? (logSnap.data() || {}).value.slice() : [];
+      logs.push(payload.log);
+      while(logs.length > 50) logs.shift();
+
+      const counter = (counterSnap.exists && (counterSnap.data() || {}).value && typeof (counterSnap.data() || {}).value === 'object') ? {...(counterSnap.data() || {}).value} : {};
+      counter[payload.ymd] = Math.max(0, Number(counter[payload.ymd] || 0)) + 1;
+
+      tx.set(studentRef, normalizeStudentForFirestore(student), {merge:false});
+      tx.set(productsRef, {key:'shopProducts', value: products, updatedAt: Date.now()}, {merge:false});
+      tx.set(pocketRef, {key:'lightPocket', value: pockets, updatedAt: Date.now()}, {merge:false});
+      tx.set(reqRef, {key:'lightMerchantRequests', value: reqs, updatedAt: Date.now()}, {merge:false});
+      tx.set(logRef, {key:'shopPurchaseLog', value: logs, updatedAt: Date.now()}, {merge:false});
+      tx.set(counterRef, {key:'shopDailyCounter', value: counter, updatedAt: Date.now()}, {merge:false});
+      result = {student, products, pockets, reqs, logs, counter, payload};
+    });
+
+    if(result){
+      // transaction 결과를 즉시 로컬에도 반영하여 화면/교사홈이 바로 따라오게 함
+      const students = getStudents();
+      const sidx = students.findIndex(s => String(s && s.id || '').trim() === String(studentId).trim());
+      if(sidx >= 0){ students[sidx] = {...students[sidx], ...result.student}; setStudents(students); }
+      setProducts(result.products);
+      savePocketAll(result.pockets);
+      saveRequestsAll(result.reqs);
+      saveLogs(result.logs);
+      saveCounter(result.counter);
+    }
+    return result;
+  }
+
+  async function performPurchase(productId){
+    const studentId = sid();
+    if(!studentId){ toast('다시 로그인해 주세요.'); return; }
+    const products = getProducts();
+    const student = getStudentObj(studentId);
+    const product = products.find(p => String(p && p.id || '') === String(productId));
+    const price = priceOf(product, products);
+    const reason = validatePurchase(student, product, price);
+    if(reason){ toast(reason); return; }
+
+    const ok = window.confirm(String(product.name || '상품') + '을(를) ' + price + '루멘에 구매할까요?\n구매하면 바로 루멘이 차감되고 빛의 상인 지급 요청에 올라갑니다.');
+    if(!ok) return;
+
+    if(window.__sebitShopPurchaseBusyFinal){ toast('구매 처리 중입니다.'); return; }
+    window.__sebitShopPurchaseBusyFinal = true;
+    try{
+      try{
+        await applyCloudPurchase(studentId, productId);
+      }catch(cloudErr){
+        console.warn('[SEBIT SHOP FINAL] cloud purchase failed; using local fallback', cloudErr);
+        applyLocalPurchase(studentId, productId);
+        try{ if(typeof syncOneStudentToFirestoreNow === 'function') syncOneStudentToFirestoreNow(getStudentObj(studentId)); }catch(_){ }
+        try{ if(typeof syncShopStateToFirestoreNow === 'function') await syncShopStateToFirestoreNow(); }catch(_){ }
+      }
+      toast('구매 완료! 빛의 상인 지급 요청에 올라갔어요.');
+      try{ renderStudentShop(); }catch(_){ }
+      try{ renderStudentPocket(); }catch(_){ }
+      try{ if(typeof renderLightMerchantRequests === 'function') renderLightMerchantRequests(); }catch(_){ }
+      try{ if(typeof renderTeacherHome === 'function' && document.body.getAttribute('data-page') === 'teacher-home') renderTeacherHome(); }catch(_){ }
+    }catch(err){
+      console.error('[SEBIT SHOP FINAL] purchase failed', err);
+      toast(String(err && err.message || '구매 처리 중 오류가 났어요.'));
+    }finally{
+      setTimeout(function(){ window.__sebitShopPurchaseBusyFinal = false; }, 450);
+    }
+  }
+
+  window.shopTryPurchase = shopTryPurchase = function(productId){ performPurchase(String(productId || '')); };
+  window.openPurchaseConfirm = openPurchaseConfirm = function(productId){ performPurchase(String(productId || '')); };
+  window.sebitDirectShopBuy = function(ev, productId){
+    try{ if(ev){ ev.preventDefault && ev.preventDefault(); ev.stopPropagation && ev.stopPropagation(); ev.stopImmediatePropagation && ev.stopImmediatePropagation(); } }catch(_){ }
+    performPurchase(String(productId || ''));
+    return false;
+  };
+
+  window.renderStudentShop = renderStudentShop = function(){
+    const me = getMe();
+    if(!me) return showPage('student-login');
+    const grid = document.getElementById('studentShopGrid');
+    const empty = document.getElementById('studentShopEmpty');
+    const lumenEl = document.getElementById('studentShopLumen');
+    const pocketRemainEl = document.getElementById('studentShopPocketRemain');
+    const dailyEl = document.getElementById('studentShopDailyCount');
+    if(lumenEl) lumenEl.textContent = String(Number(me.lumen)||0);
+    const items = getMyPocketItems(me.id);
+    const total = pocketTotalCount(items);
+    if(pocketRemainEl) pocketRemainEl.textContent = total + '/10';
+    if(dailyEl) dailyEl.textContent = '제한 없음';
+    if(!grid) return;
+    grid.innerHTML = '';
+
+    const tabs = document.querySelector('.lightshop-tabs');
+    if(tabs){
+      tabs.innerHTML = ['전체','간식','쿠폰','학용품','특별'].map(function(cat){ return '<button class="lightshop-tab" data-cat="'+escapeHtml(cat)+'" type="button">'+escapeHtml(cat)+'</button>'; }).join('');
+      if(!tabs.dataset.shopFinalBound){
+        tabs.dataset.shopFinalBound = '1';
+        tabs.addEventListener('click', function(e){
+          const b = e.target.closest && e.target.closest('button[data-cat]');
+          if(!b) return;
+          try{ localStorage.setItem(SHOP_UI.catKey, b.dataset.cat || '전체'); }catch(_){ }
+          renderStudentShop();
+        });
+      }
+    }
+    const selectedCat = localStorage.getItem(SHOP_UI.catKey) || '전체';
+    if(tabs) Array.from(tabs.querySelectorAll('.lightshop-tab')).forEach(function(b){ b.classList.toggle('is-active', (b.dataset.cat||'') === selectedCat); });
+
+    const products = getProducts();
+    const list = products.filter(function(p){ return p && p.isPublished !== false; });
+    const filtered = selectedCat === '전체' ? list : list.filter(function(p){ return String(p.category||'') === selectedCat; });
+    const deal = getOrMakeDeal(list);
+
+    const dealLine = document.createElement('div');
+    dealLine.className = 'shop-dealline';
+    if(deal){
+      const dp = list.find(function(x){ return x.id === deal.productId; });
+      dealLine.innerHTML = '오늘의 추천: <b>' + escapeHtml(dp && dp.name || '') + '</b> · <span class="shop-dealrate">25% OFF</span>';
+    }else{
+      dealLine.innerHTML = '<span class="muted">오늘의 추천 상품이 없습니다.</span>';
+    }
+    grid.appendChild(dealLine);
+
+    if(!filtered.length){ if(empty) empty.textContent = '등록된 상품이 없습니다.'; return; }
+    if(empty) empty.textContent = '';
+
+    filtered.forEach(function(p){
+      const price = priceOf(p, list);
+      const stock = Math.max(0, Number(p.stock || 0));
+      const isSoldOut = stock <= 0;
+      const wrap = document.createElement('div');
+      wrap.className = 'lightshop-item' + (isSoldOut ? ' is-disabled' : '');
+      if(deal && deal.productId === p.id){
+        const badge = document.createElement('div'); badge.className = 'shop-deal-badge'; badge.textContent = '오늘의 추천'; wrap.appendChild(badge);
+      }
+      if(isSoldOut){ const ban = document.createElement('div'); ban.className = 'lightshop-banner'; ban.textContent = '품절'; wrap.appendChild(ban); }
+      const thumb = document.createElement('div'); thumb.className = 'lightshop-thumb'; thumb.innerHTML = '<img src="assets/shop/'+((Number(p.imgId||0)%10)+1)+'.png" class="shop-thumb-img">'; wrap.appendChild(thumb);
+      const name = document.createElement('div'); name.className = 'lightshop-name'; name.textContent = p.name || '상품'; wrap.appendChild(name);
+      if(p.desc){ const desc = document.createElement('div'); desc.className = 'lightshop-desc'; desc.textContent = p.desc; wrap.appendChild(desc); }
+      const meta = document.createElement('div'); meta.className = 'lightshop-meta';
+      const priceDiv = document.createElement('div'); priceDiv.className = 'lightshop-price'; priceDiv.textContent = '● ' + price;
+      const stockDiv = document.createElement('div'); stockDiv.className = 'muted small'; stockDiv.textContent = '재고 ' + stock;
+      const catDiv = document.createElement('div'); catDiv.className = 'muted small lightshop-cat'; catDiv.textContent = p.category || '';
+      meta.appendChild(priceDiv); meta.appendChild(stockDiv); meta.appendChild(catDiv); wrap.appendChild(meta);
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'btn wide lightshop-buy'; btn.textContent = '구매';
+      btn.setAttribute('data-shop-buy', String(p.id || ''));
+      btn.addEventListener('pointerdown', function(e){ e.stopPropagation(); }, true);
+      btn.addEventListener('touchstart', function(e){ e.stopPropagation(); }, {capture:true, passive:true});
+      btn.addEventListener('click', function(e){
+        e.preventDefault(); e.stopPropagation(); if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+        performPurchase(String(p.id || ''));
+      }, true);
+      wrap.appendChild(btn);
+      grid.appendChild(wrap);
+    });
+  };
+
+  function buyEventBridge(e){
+    const btn = e.target && e.target.closest ? e.target.closest('button.lightshop-buy,[data-shop-buy]') : null;
+    if(!btn) return;
+    const page = String(document.body.getAttribute('data-page') || '');
+    if(page !== 'student-shop') return;
+    const pid = btn.getAttribute('data-shop-buy') || '';
+    if(!pid) return;
+    e.preventDefault(); e.stopPropagation(); if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+    performPurchase(pid);
+  }
+  document.addEventListener('click', buyEventBridge, true);
+  document.addEventListener('touchend', buyEventBridge, true);
+
+})();

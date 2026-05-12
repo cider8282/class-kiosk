@@ -3376,3 +3376,28 @@ body[data-page="student-shop"] .lightshop-item.is-disabled{
   opacity: .72 !important;
   pointer-events: auto !important;
 }
+
+
+/* === SEBIT SHOP SYSTEM REBUILD FINAL TOUCH CSS === */
+body[data-page="student-shop"] #studentShopGrid,
+body[data-page="student-shop"] .lightshop-item,
+body[data-page="student-shop"] .lightshop-buy{
+  pointer-events: auto !important;
+}
+body[data-page="student-shop"] .lightshop-item{
+  position: relative !important;
+  z-index: 20 !important;
+  overflow: visible !important;
+}
+body[data-page="student-shop"] .lightshop-buy{
+  position: relative !important;
+  z-index: 2147483647 !important;
+  touch-action: manipulation !important;
+  cursor: pointer !important;
+  opacity: 1 !important;
+  -webkit-tap-highlight-color: rgba(0,0,0,.22) !important;
+}
+body[data-page="student-shop"] .lightshop-banner,
+body[data-page="student-shop"] .shop-deal-badge{
+  pointer-events: none !important;
+}
