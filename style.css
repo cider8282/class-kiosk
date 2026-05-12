@@ -3333,3 +3333,46 @@ body[data-page="student-login"] .bg{
   background-position: center top;
   background-color: #e9e9e9;
 }
+
+/* === SEBIT SHOP TAP FIX v2 ===
+   학생용 상점에서 버튼 위를 카드/푸터/투명 레이어가 덮어 터치가 안 들어가는 문제 방지
+*/
+body[data-page="student-shop"] .student-card,
+body[data-page="student-shop"] .lightshop-shell,
+body[data-page="student-shop"] #studentShopGrid,
+body[data-page="student-shop"] .lightshop-item{
+  pointer-events: auto !important;
+}
+
+body[data-page="student-shop"] .lightshop-item{
+  position: relative !important;
+  z-index: 10 !important;
+  overflow: visible !important;
+}
+
+body[data-page="student-shop"] .lightshop-buy{
+  position: relative !important;
+  z-index: 9999 !important;
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  -webkit-tap-highlight-color: rgba(0,0,0,.15) !important;
+  cursor: pointer !important;
+  opacity: 1 !important;
+}
+
+body[data-page="student-shop"] .lightshop-banner{
+  pointer-events: none !important;
+  z-index: 20 !important;
+}
+
+body[data-page="student-shop"] .lightshop-bottom,
+body[data-page="student-shop"] .lightshop-close,
+body[data-page="student-shop"] .lightshop-note{
+  pointer-events: auto !important;
+}
+
+/* 품절/판매중단 카드도 버튼 터치는 JS에 도달시켜 이유를 안내함 */
+body[data-page="student-shop"] .lightshop-item.is-disabled{
+  opacity: .72 !important;
+  pointer-events: auto !important;
+}
