@@ -1020,6 +1020,47 @@ let __sebitActivityLoadingFromFirestore = false;
 let __sebitActivitySyncTimer = null;
 let __sebitActivityRealtimeStarted = false;
 let __sebitUnsubActivityState = null;
+let __sebitActivityDeferredRefreshTimer = null;
+
+function sebitIsStudentReadingInput(el){
+  const id = String(el?.id || "");
+  return id === "studentReadTitle" || id === "studentReadStart" || id === "studentReadEnd";
+}
+function sebitMarkStudentReadingTyping(){
+  window.__sebitStudentReadingTypingUntil = Date.now() + 2500;
+}
+function sebitIsStudentReadingTyping(){
+  return sebitIsStudentReadingInput(document.activeElement) || Date.now() < Number(window.__sebitStudentReadingTypingUntil || 0);
+}
+function sebitIsTeacherActivityEditing(){
+  const el = document.activeElement;
+  return !!(el && el.closest && el.closest("#activityTableWrap")) || Date.now() < Number(window.__sebitTeacherActivityEditingUntil || 0);
+}
+function sebitReadingDraftKey(studentId, date){
+  return `sebit:readingDraft:${date || todayKey()}:${studentId || ""}`;
+}
+function sebitReadLocalReadingDraft(studentId, date){
+  try{
+    const raw = sessionStorage.getItem(sebitReadingDraftKey(studentId || session?.studentId, date || todayKey()));
+    if(!raw) return null;
+    const v = JSON.parse(raw);
+    if(!v || typeof v !== "object") return null;
+    return { title:String(v.title || ""), start:String(v.start || ""), end:String(v.end || "") };
+  }catch(_){ return null; }
+}
+function sebitWriteLocalReadingDraft(studentId, date, draft){
+  try{
+    sessionStorage.setItem(sebitReadingDraftKey(studentId || session?.studentId, date || todayKey()), JSON.stringify({
+      title:String(draft?.title || ""),
+      start:String(draft?.start || ""),
+      end:String(draft?.end || ""),
+      at:Date.now()
+    }));
+  }catch(_){ }
+}
+function sebitClearLocalReadingDraft(studentId, date){
+  try{ sessionStorage.removeItem(sebitReadingDraftKey(studentId || session?.studentId, date || todayKey())); }catch(_){ }
+}
 
 function fsActivityLocalStorageKeyFromName(name){
   try{
@@ -1095,14 +1136,38 @@ async function loadActivityStateFromFirestore(){
 function refreshActivityPagesFromRealtime(){
   try{
     const page = String(document.body.getAttribute("data-page") || "");
+
+    // 학생이 독서 제목/쪽수를 입력하는 중에는 실시간 동기화로 학생 홈을 다시 그리지 않는다.
+    // 입력 중 재렌더가 일어나면 패드에서 글자가 사라지고 키보드가 튕기는 문제가 생긴다.
+    if(page.startsWith("student-") && sebitIsStudentReadingTyping()){
+      clearTimeout(__sebitActivityDeferredRefreshTimer);
+      __sebitActivityDeferredRefreshTimer = setTimeout(()=>{
+        if(!sebitIsStudentReadingTyping()) refreshActivityPagesFromRealtime();
+      }, 900);
+      return;
+    }
+
+    // 교사 활동 기록 상세 입력칸에 포커스가 있을 때도 즉시 재렌더하지 않는다.
+    if(page === "teacher-activity" && sebitIsTeacherActivityEditing()){
+      clearTimeout(__sebitActivityDeferredRefreshTimer);
+      __sebitActivityDeferredRefreshTimer = setTimeout(()=>{
+        if(!sebitIsTeacherActivityEditing()) refreshActivityPagesFromRealtime();
+      }, 900);
+      return;
+    }
+
     if(page === "teacher-home" && typeof renderTeacherHome === "function") renderTeacherHome();
     if(page === "teacher-activity" && typeof renderTeacherActivity === "function") renderTeacherActivity();
-    if(page.startsWith("student-") && typeof renderStudentShell === "function") renderStudentShell();
+
+    // 활동 기록 동기화 때문에 학생 화면 전체(renderStudentShell)를 다시 만들지 않는다.
+    // 독서 입력칸은 학생 홈 내부 일부만 조용히 갱신한다.
     if(page === "student-home" && typeof renderStudentActivity === "function") renderStudentActivity();
-    if(page === "student-home" && typeof renderStudentHomeV1 === "function") renderStudentHomeV1();
-    if(typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
+
+    const todayModal = document.getElementById("todayReadingDetailModal");
+    if(todayModal && !todayModal.classList.contains("hidden") && typeof renderTodayReadingDetail === "function") renderTodayReadingDetail();
   }catch(err){ console.warn("[SEBIT] activity realtime refresh skipped", err); }
 }
+
 function startActivityFirestoreRealtimeSync(){
   if(__sebitActivityRealtimeStarted) return;
   __sebitActivityRealtimeStarted = true;
@@ -3206,22 +3271,22 @@ function validateReadingDraft(){
 
 
 function saveReadingDraft(){
-  ensureTodayActivityRecord(session.studentId);
+  const sid = String(session?.studentId || "");
+  if(!sid) return;
   const today = todayKey();
-  const daily = getDailyActivity();
-  const rec = daily[today][session.studentId];
-
-  rec.readingDraft = {
+  const draft = {
     title: ($("#studentReadTitle")?.value || "").trim(),
     start: ($("#studentReadStart")?.value || "").trim(),
     end: ($("#studentReadEnd")?.value || "").trim(),
   };
 
-  setDailyActivity(daily);
+  // 입력 중에는 Firestore/localStorage에 쓰지 않고, 현재 탭의 임시 저장소에만 보관한다.
+  // 저장 버튼을 눌렀을 때만 activityDaily에 확정 저장하여 패드 재렌더 튕김을 막는다.
+  sebitMarkStudentReadingTyping();
+  sebitWriteLocalReadingDraft(sid, today, draft);
 
   const hint = $("#studentReadingSavedHint");
-  if (hint) hint.textContent = "임시 저장됨";
-  setTimeout(()=>{ if (hint) hint.textContent = "입력하면 자동 저장됩니다."; }, 900);
+  if (hint) hint.textContent = "입력 중";
 }
 
 
@@ -3284,8 +3349,7 @@ function commitReadingEntry(){
     return;
   }
 
-  // Validate using the synced draft
-  setDailyActivity(daily);
+  // Validate using the synced draft. 입력 검증 전에는 서버/로컬 저장을 하지 않는다.
   if (!validateReadingDraft()) {
     const err = $("#studentActivityError");
     if (err) err.textContent = "독서 입력을 확인해주세요.";
@@ -3316,6 +3380,7 @@ function commitReadingEntry(){
 
   // reset draft
   rec.readingDraft = { title: "", start: "", end: "" };
+  sebitClearLocalReadingDraft(session.studentId, today);
   setDailyActivity(daily);
 
   // clear inputs
@@ -3330,7 +3395,7 @@ function commitReadingEntry(){
   if (err) err.textContent = "";
   const hint = $("#studentReadingSavedHint");
   if (hint) hint.textContent = "저장됨";
-  setTimeout(()=>{ if (hint) hint.textContent = "입력하면 자동 저장됩니다."; }, 900);
+  setTimeout(()=>{ if (hint) hint.textContent = "추가 버튼을 누르면 저장됩니다."; }, 900);
 
   const sel = $("#studentReadingSelect");
   if (sel) sel.value = "";
@@ -3456,15 +3521,18 @@ function setDailyActivity(next){
 function ensureTodayActivityRecord(studentId){
   const today = todayKey();
   const daily = getDailyActivity();
-  if (!daily[today] || typeof daily[today] !== "object") daily[today] = {};
+  let changed = false;
+  if (!daily[today] || typeof daily[today] !== "object") { daily[today] = {}; changed = true; }
   if (!daily[today][studentId] || typeof daily[today][studentId] !== "object") {
     daily[today][studentId] = { morning:false, reading:[], readingDraft:{title:"", start:"", end:""} };
+    changed = true;
   }
-  if (!Array.isArray(daily[today][studentId].reading)) daily[today][studentId].reading = [];
+  if (!Array.isArray(daily[today][studentId].reading)) { daily[today][studentId].reading = []; changed = true; }
   if (!daily[today][studentId].readingDraft || typeof daily[today][studentId].readingDraft !== 'object') {
     daily[today][studentId].readingDraft = { title:'', start:'', end:'' };
+    changed = true;
   }
-  setDailyActivity(daily);
+  if (changed) setDailyActivity(daily);
   return daily;
 }
 
@@ -3491,9 +3559,11 @@ function renderStudentActivity(){
   const t = $("#studentReadTitle");
   const s = $("#studentReadStart");
   const e = $("#studentReadEnd");
-  if (t) t.value = rec.readingDraft?.title ?? "";
-  if (s) s.value = rec.readingDraft?.start ?? "";
-  if (e) e.value = rec.readingDraft?.end ?? "";
+  const localDraft = sebitReadLocalReadingDraft(session.studentId, today);
+  const draftForInputs = localDraft || rec.readingDraft || { title:"", start:"", end:"" };
+  if (t && document.activeElement !== t) t.value = draftForInputs.title ?? "";
+  if (s && document.activeElement !== s) s.value = draftForInputs.start ?? "";
+  if (e && document.activeElement !== e) e.value = draftForInputs.end ?? "";
 
   if (t) t.disabled = locked;
   if (s) s.disabled = locked;
@@ -3704,7 +3774,8 @@ function renderTeacherActivity(){
     };
 
     body.querySelectorAll('input[data-i]').forEach(inp=>{
-      inp.addEventListener("input", applyChange);
+      inp.addEventListener("focus", ()=>{ window.__sebitTeacherActivityEditingUntil = Date.now() + 2500; });
+      inp.addEventListener("input", ()=>{ window.__sebitTeacherActivityEditingUntil = Date.now() + 2500; applyChange(); });
       inp.addEventListener("change", applyChange);
     });
 
@@ -4629,7 +4700,8 @@ function bind() {
   ["studentReadTitle","studentReadStart","studentReadEnd"].forEach(id=>{
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener("input", ()=> debouncedSaveReading());
+    el.addEventListener("focus", ()=> sebitMarkStudentReadingTyping());
+    el.addEventListener("input", ()=> { sebitMarkStudentReadingTyping(); debouncedSaveReading(); });
   });
 
   // Reading commit
