@@ -12431,7 +12431,7 @@ function closeStudentShopPreviewModal(){
   if(window.__sebitShopSystemRebuildFinal) return;
   window.__sebitShopSystemRebuildFinal = true;
 
-  function sid(){ return String((window.session && session.studentId) || '').trim(); }
+  function sid(){ return String((typeof session !== 'undefined' && session && session.studentId) || '').trim(); }
   function safeId(prefix){
     try{ if(window.crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); }catch(_){ }
     return String(prefix||'id') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,10);
@@ -12791,4 +12791,228 @@ function closeStudentShopPreviewModal(){
   document.addEventListener('click', buyEventBridge, true);
   document.addEventListener('touchend', buyEventBridge, true);
 
+})();
+
+
+/* =========================================================
+   SEBIT PATCH: shop render + duplicate purchase stabilizer 2026-05-12
+   목적
+   - Firestore/localStorage 변경 때마다 화면을 즉시 갈아엎는 문제 완화
+   - iPad touchend + click 이중 실행, 여러 구매 핸들러 중복 실행 차단
+   - 구매 처리 중에는 상점/포켓/학생쉘 재렌더를 잠시 보류하고 끝나면 1회만 갱신
+   ========================================================= */
+(function(){
+  if(window.__sebitShopRenderStablePatchInstalled) return;
+  window.__sebitShopRenderStablePatchInstalled = true;
+
+  const STATE = window.__sebitShopRenderState = window.__sebitShopRenderState || {
+    dirty: {},
+    timer: null,
+    lockUntil: 0,
+    lastBuyAt: 0,
+    lastBuyPid: '',
+    lastTouchAt: 0
+  };
+
+  function now(){ return Date.now ? Date.now() : new Date().getTime(); }
+  function page(){
+    try{ return String(document.body && document.body.getAttribute('data-page') || ''); }
+    catch(_){ return ''; }
+  }
+  function isLocked(){ return now() < Number(STATE.lockUntil || 0); }
+  function lockRender(ms){
+    STATE.lockUntil = Math.max(Number(STATE.lockUntil || 0), now() + Math.max(0, Number(ms || 0)));
+  }
+  function markDirty(key){
+    STATE.dirty[key || 'shop'] = true;
+    scheduleFlush();
+  }
+  function scheduleFlush(delay){
+    clearTimeout(STATE.timer);
+    const wait = Math.max(Number(delay || 140), isLocked() ? (STATE.lockUntil - now() + 60) : 0);
+    STATE.timer = setTimeout(flush, wait);
+  }
+  function flush(){
+    clearTimeout(STATE.timer);
+    STATE.timer = null;
+    if(isLocked()){ scheduleFlush(80); return; }
+
+    const dirty = STATE.dirty || {};
+    STATE.dirty = {};
+    const p = page();
+
+    try{
+      if(dirty.shop && p === 'student-shop' && typeof window.__sebitOriginalRenderStudentShopStable === 'function'){
+        window.__sebitOriginalRenderStudentShopStable();
+      }
+    }catch(err){ console.warn('[SEBIT STABLE] student shop render skipped', err); }
+
+    try{
+      if(dirty.pocket && p === 'student-pocket' && typeof window.__sebitOriginalRenderStudentPocketStable === 'function'){
+        window.__sebitOriginalRenderStudentPocketStable();
+      }
+    }catch(err){ console.warn('[SEBIT STABLE] student pocket render skipped', err); }
+
+    try{
+      if(dirty.teacherHome && p === 'teacher-home' && typeof window.renderTeacherHome === 'function'){
+        window.renderTeacherHome();
+      }
+    }catch(err){ console.warn('[SEBIT STABLE] teacher home render skipped', err); }
+
+    try{
+      if(dirty.merchant && typeof window.renderLightMerchantRequests === 'function'){
+        const body = document.getElementById('lightMerchantRequestsBody');
+        const modal = document.getElementById('lightMerchantRequestsModal');
+        const isOpen = !!(body && (!modal || !modal.classList || !modal.classList.contains('hidden')));
+        if(isOpen) window.renderLightMerchantRequests();
+      }
+    }catch(err){ console.warn('[SEBIT STABLE] merchant render skipped', err); }
+
+    try{
+      if(dirty.adminShop && String(location.hash || '') === '#admin-shop' && typeof window.openAdminModal === 'function'){
+        window.openAdminModal({ key:'shop', title:'상점 관리' });
+      }
+    }catch(err){ console.warn('[SEBIT STABLE] admin shop render skipped', err); }
+  }
+
+  window.sebitShopMarkDirty = markDirty;
+  window.sebitShopScheduleFlush = scheduleFlush;
+  window.sebitShopLockRender = lockRender;
+
+  // 기존 hold 함수가 no-op인 경우를 실제 잠금으로 보강
+  window.sebitHoldRealtimeRender = function(ms){
+    lockRender(ms || 1200);
+    markDirty('shop');
+    markDirty('pocket');
+    markDirty('merchant');
+  };
+
+  // 기존 setItem hook들이 부르는 강제 새로고침 함수를 '즉시 재렌더'가 아닌 '한 번만 예약'으로 변경
+  window.sebitFinalRefreshShopScreens = function(){
+    markDirty('shop');
+    markDirty('pocket');
+    markDirty('merchant');
+    markDirty('teacherHome');
+    markDirty('adminShop');
+  };
+  window.refreshShopPagesFromRealtime = window.sebitFinalRefreshShopScreens;
+
+  const prevSafeRefresh = window.sebitRunRealtimeRefreshSafely;
+  window.sebitRunRealtimeRefreshSafely = function(callback){
+    try{
+      const p = page();
+      if(p === 'intro' || p === 'teacher-login' || p === 'student-login') return;
+      if(isLocked()){
+        markDirty('shop');
+        markDirty('pocket');
+        markDirty('merchant');
+        return;
+      }
+      if(typeof callback === 'function') callback();
+    }catch(err){
+      try{ if(typeof prevSafeRefresh === 'function') prevSafeRefresh(callback); }
+      catch(e){ console.warn('[SEBIT STABLE] realtime refresh skipped', e); }
+    }
+  };
+
+  // render 함수 자체도 구매 중에는 갈아엎지 않도록 마지막 안전장치 적용
+  function wrapRender(name, dirtyKey){
+    try{
+      const fn = window[name];
+      if(typeof fn !== 'function' || fn.__sebitStableWrapped) return;
+      const originalKey = '__sebitOriginal' + name.charAt(0).toUpperCase() + name.slice(1) + 'Stable';
+      window[originalKey] = fn;
+      const wrapped = function(){
+        if(isLocked()){
+          markDirty(dirtyKey);
+          return;
+        }
+        return fn.apply(this, arguments);
+      };
+      wrapped.__sebitStableWrapped = true;
+      window[name] = wrapped;
+      try{ eval(name + ' = window[name];'); }catch(_){ }
+    }catch(err){ console.warn('[SEBIT STABLE] render wrap skipped', name, err); }
+  }
+  wrapRender('renderStudentShop', 'shop');
+  wrapRender('renderStudentPocket', 'pocket');
+  wrapRender('renderStudentShell', 'shop');
+
+  function getBuyButton(target){
+    try{
+      if(!target || !target.closest) return null;
+      const p = page();
+      if(p !== 'student-shop') return null;
+      return target.closest('button.lightshop-buy,[data-shop-buy]');
+    }catch(_){ return null; }
+  }
+  function getPid(btn){
+    try{ return String(btn && (btn.getAttribute('data-shop-buy') || (btn.dataset && btn.dataset.shopBuy) || '') || ''); }
+    catch(_){ return ''; }
+  }
+  function stop(e){
+    try{ e.preventDefault && e.preventDefault(); }catch(_){ }
+    try{ e.stopPropagation && e.stopPropagation(); }catch(_){ }
+    try{ e.stopImmediatePropagation && e.stopImmediatePropagation(); }catch(_){ }
+  }
+  function callPurchase(pid, e){
+    if(!pid) return;
+    const handler = window.shopTryPurchase || window.openPurchaseConfirm || window.sebitDirectShopBuy;
+    if(typeof handler !== 'function'){
+      try{ if(typeof window.toast === 'function') window.toast('구매 기능 연결을 찾지 못했어요.'); }catch(_){ }
+      return;
+    }
+    lockRender(2500);
+    markDirty('shop');
+    try{
+      if(handler === window.sebitDirectShopBuy) handler(e || null, pid);
+      else handler(pid);
+    }finally{
+      // 구매 성공/취소/오류 뒤에도 밀린 화면 갱신은 한 번만 실행
+      setTimeout(function(){
+        markDirty('shop');
+        markDirty('pocket');
+        markDirty('merchant');
+        markDirty('teacherHome');
+      }, 900);
+    }
+  }
+
+  function buyCaptureBridge(e){
+    const btn = getBuyButton(e.target);
+    if(!btn) return;
+    const pid = getPid(btn);
+    const t = now();
+
+    // iPad에서 touchend 뒤 synthetic click이 다시 오는 것을 차단
+    if(e.type === 'touchend') STATE.lastTouchAt = t;
+    if(e.type === 'click' && t - Number(STATE.lastTouchAt || 0) < 900){ stop(e); return; }
+
+    // 빠른 두 번 누르기 / 여러 핸들러 동시 연결에 의한 중복 구매 차단
+    if(pid && STATE.lastBuyPid === pid && t - Number(STATE.lastBuyAt || 0) < 1400){
+      stop(e);
+      try{ if(typeof window.toast === 'function') window.toast('구매 처리 중입니다.'); }catch(_){ }
+      return;
+    }
+    STATE.lastBuyPid = pid;
+    STATE.lastBuyAt = t;
+
+    stop(e);
+    if(btn.disabled){
+      try{ if(typeof window.toast === 'function') window.toast('품절 또는 판매중단 상품입니다.'); }catch(_){ }
+      return;
+    }
+    callPurchase(pid, e);
+  }
+
+  // document에 이미 붙어 있는 여러 구매 리스너보다 먼저 잡기 위해 window capture에서 차단
+  window.addEventListener('touchend', buyCaptureBridge, true);
+  window.addEventListener('click', buyCaptureBridge, true);
+
+  // 상점 탭/화면 복귀 때도 직접 렌더 남발 대신 예약
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden){ markDirty('shop'); markDirty('pocket'); markDirty('merchant'); }
+  });
+
+  console.log('[SEBIT STABLE] shop render + duplicate purchase stabilizer installed');
 })();
