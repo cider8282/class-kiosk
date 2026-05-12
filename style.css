@@ -3439,3 +3439,10 @@ body[data-page="student-shop"] [data-sebit-purchase-id][data-sebit-processing="1
   opacity: .65 !important;
   pointer-events: none !important;
 }
+
+
+/* 독서기록 안정화: 교사 활동기록 펼침 영역은 읽기 전용으로 표시 */
+.activity-readonly-list{display:flex;flex-direction:column;gap:8px;}
+.activity-readonly-row{display:grid;grid-template-columns:minmax(180px,1fr) 90px 70px;gap:10px;align-items:center;padding:10px 12px;border:1px solid rgba(148,163,184,.35);border-radius:12px;background:rgba(255,255,255,.75);}
+.activity-readonly-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media (max-width: 720px){.activity-readonly-row{grid-template-columns:1fr;gap:4px;}}
