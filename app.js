@@ -2649,12 +2649,21 @@ function renderTeacherHome() {
 
   const daily = readJSON(LS.activityDaily, {});
   const day = daily[today] || {};
+  const isValidSavedReading = (r)=>{
+    const title = String(r?.title || "").trim();
+    const start = Number(r?.start);
+    const end = Number(r?.end);
+    return title !== "" && Number.isFinite(start) && Number.isFinite(end) && start > 0 && end > 0 && end >= start;
+  };
   let morningDone = 0;
   let readingDone = 0;
   st.filter(s=>s.active!==false).forEach(s=>{
     const rec = day[s.id];
     if (rec?.morning) morningDone++;
-    if (Array.isArray(rec?.reading) && rec.reading.length > 0) readingDone++;
+    // 교사홈 요약은 학생 입력 중 임시값/빈 배열을 보지 않고,
+    // 활동기록에 실제 저장된 유효 독서 기록이 1건 이상일 때만 완료로 계산함.
+    const hasSavedReading = Array.isArray(rec?.reading) && rec.reading.some(isValidSavedReading);
+    if (hasSavedReading) readingDone++;
   });
   $("#morningSummary").textContent = `${morningDone} / ${activeCount}`;
   $("#readingSummary").textContent = `${readingDone} / ${activeCount}`;
@@ -2673,7 +2682,7 @@ function renderTeacherHome() {
       const rec = day[s.id];
       if (Array.isArray(rec?.reading)) {
         rec.reading.forEach(r=>{
-          if (!r) return;
+          if (!isValidSavedReading(r)) return;
           items.push({ at: Number(r.at||r.ts||0), name: s.name, title: String(r.title||""), start: r.start, end: r.end });
         });
       }
