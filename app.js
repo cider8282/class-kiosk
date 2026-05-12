@@ -3443,6 +3443,9 @@ function renderStudentDonationStatus(){
 
 
 /* === Activity (Morning/Reading) === */
+// 교사 활동 기록: 펼친 독서 행을 실시간 재렌더 후에도 유지
+const __sebitActivityExpandedRows = window.__sebitActivityExpandedRows || (window.__sebitActivityExpandedRows = new Set());
+
 function getDailyActivity(){
   return readJSON(LS.activityDaily, {});
 }
@@ -3640,12 +3643,20 @@ function renderTeacherActivity(){
     `;
     const rowsWrap = grid.querySelector(".activity-input-rows");
 
-    const ensureReadingArr = ()=>{
-      const d = ensureTodayActivityRecord(studentId);
-      const arr = d[today][studentId].reading;
-      while (arr.length < 3) arr.push({ title:"", start:"", end:"", ts:Date.now() });
-      if (arr.length > 3) arr.length = 3;
-      setDailyActivity(d);
+    // 펼치기만 눌렀는데 저장/실시간 동기화가 발생하지 않도록
+    // 화면 표시용 배열은 로컬 복사본으로만 만든다.
+    const getDisplayReadingArr = ()=>{
+      const src = Array.isArray(reading) ? reading.slice(0, 3) : [];
+      const arr = [];
+      for (let i=0; i<3; i++){
+        const r = src[i] || {};
+        arr.push({
+          title: String(r.title ?? ""),
+          start: String(r.start ?? ""),
+          end: String(r.end ?? ""),
+          ts: r.ts || Date.now()
+        });
+      }
       return arr;
     };
 
@@ -3656,7 +3667,7 @@ function renderTeacherActivity(){
       return String(end - start + 1);
     };
 
-    const arr = ensureReadingArr();
+    const arr = getDisplayReadingArr();
     for (let i=0;i<3;i++){
       const r = arr[i] || { title:"", start:"", end:"" };
       const row = document.createElement("div");
@@ -3727,13 +3738,26 @@ function renderTeacherActivity(){
     const pill = tr.querySelector(".activity-pill");
     const dtr = makeDetailRow(reading, s.id, s.name, (cnt)=>{ if (pill) pill.textContent = `${cnt}/3`; });
     const toggleBtn = tr.querySelector('[data-action="toggle"]');
-    toggleBtn.addEventListener("click", ()=>{
-      const open = !dtr.classList.contains("hidden");
-      if (open) {
+    const expandedKey = String(s.id || "");
+    const expandedSet = window.__sebitActivityExpandedRows || __sebitActivityExpandedRows;
+    if (expandedSet.has(expandedKey)) {
+      dtr.classList.remove("hidden");
+      toggleBtn.textContent = "접기";
+    } else {
+      dtr.classList.add("hidden");
+      toggleBtn.textContent = "펼치기";
+    }
+    toggleBtn.addEventListener("click", (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      const isOpen = !dtr.classList.contains("hidden");
+      if (isOpen) {
         dtr.classList.add("hidden");
+        expandedSet.delete(expandedKey);
         toggleBtn.textContent = "펼치기";
       } else {
         dtr.classList.remove("hidden");
+        expandedSet.add(expandedKey);
         toggleBtn.textContent = "접기";
       }
     });
