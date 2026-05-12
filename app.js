@@ -6472,35 +6472,48 @@ if(j.id==="timekeeper"){
         `;
         const b = tr.querySelector("button");
         if(b){
-          b.addEventListener("click", ()=>{
+          b.addEventListener("click", async ()=>{
             if(lmIsClosed()){ toast("마감 상태입니다."); return; }
             if(!confirm("상품을 잘 전달했나요?")) return;
-            const all = lmGetTodayList();
-            const idx = all.findIndex(x=>x && x.id===r.id);
-            if(idx>-1){
-              all[idx].status = "done";
-              all[idx].doneAt = Date.now();
-              lmSetTodayList(all);
-              lmPushHistory(all[idx]);
-
-              // 상점관리 구매기록에도 이관(표시용)
-              const logsRaw = readJSON(LS.shopPurchaseLog, []);
-              const logs = Array.isArray(logsRaw) ? logsRaw : [];
-              const done = all[idx];
-              removePocketRequestItem(done.studentId, done);
-              logs.push({
-                ts: new Date().toISOString(),
-                studentId: done.studentId,
-                studentName: String(done.studentName||""),
-                student: String(done.studentName||""),
-                productId: done.productId,
-                productName: String(done.productName||""),
-                product: String(done.productName||""),
-                price: Number(done.price||0)
-              });
-              while(logs.length > 50) logs.shift();
-              writeJSON(LS.shopPurchaseLog, logs);
-              pushSystemLog(`[빛의 상인] 지급완료: ${String(done.studentName||"")} · ${String(done.productName||"")} · ${new Date().toISOString()}`);
+            b.disabled = true;
+            const oldText = b.textContent;
+            b.textContent = "처리 중";
+            try{
+              if(typeof window.sebitCompleteLightMerchantRequest === "function"){
+                await window.sebitCompleteLightMerchantRequest(r.id, r.requestedYmd || lmTodayKey());
+              }else{
+                const all = lmGetTodayList();
+                const idx = all.findIndex(x=>x && x.id===r.id);
+                if(idx>-1){
+                  all[idx].status = "done";
+                  all[idx].doneAt = Date.now();
+                  lmSetTodayList(all);
+                  lmPushHistory(all[idx]);
+                  const logsRaw = readJSON(LS.shopPurchaseLog, []);
+                  const logs = Array.isArray(logsRaw) ? logsRaw : [];
+                  const done = all[idx];
+                  removePocketRequestItem(done.studentId, done);
+                  logs.push({
+                    ts: new Date().toISOString(),
+                    studentId: done.studentId,
+                    studentName: String(done.studentName||""),
+                    student: String(done.studentName||""),
+                    productId: done.productId,
+                    productName: String(done.productName||""),
+                    product: String(done.productName||""),
+                    price: Number(done.price||0)
+                  });
+                  while(logs.length > 50) logs.shift();
+                  writeJSON(LS.shopPurchaseLog, logs);
+                  pushSystemLog(`[빛의 상인] 지급완료: ${String(done.studentName||"")} · ${String(done.productName||"")} · ${new Date().toISOString()}`);
+                }
+              }
+              toast("지급 완료");
+            }catch(err){
+              console.error("[SEBIT LIGHT MERCHANT] complete failed", err);
+              toast(String(err && err.message || "지급 처리 중 오류가 났어요."));
+              b.disabled = false;
+              b.textContent = oldText;
             }
             rerender();
           });
@@ -7424,35 +7437,48 @@ if(j.id==="timekeeper"){
         `;
         const b = tr.querySelector("button");
         if(b){
-          b.addEventListener("click", ()=>{
+          b.addEventListener("click", async ()=>{
             if(lmIsClosed()){ toast("마감 상태입니다."); return; }
             if(!confirm("상품을 잘 전달했나요?")) return;
-            const all = lmGetTodayList();
-            const idx = all.findIndex(x=>x && x.id===r.id);
-            if(idx>-1){
-              all[idx].status = "done";
-              all[idx].doneAt = Date.now();
-              lmSetTodayList(all);
-              lmPushHistory(all[idx]);
-
-              // 상점관리 구매기록에도 이관(표시용)
-              const logsRaw = readJSON(LS.shopPurchaseLog, []);
-              const logs = Array.isArray(logsRaw) ? logsRaw : [];
-              const done = all[idx];
-              removePocketRequestItem(done.studentId, done);
-              logs.push({
-                ts: new Date().toISOString(),
-                studentId: done.studentId,
-                studentName: String(done.studentName||""),
-                student: String(done.studentName||""),
-                productId: done.productId,
-                productName: String(done.productName||""),
-                product: String(done.productName||""),
-                price: Number(done.price||0)
-              });
-              while(logs.length > 50) logs.shift();
-              writeJSON(LS.shopPurchaseLog, logs);
-              pushSystemLog(`[빛의 상인] 지급완료: ${String(done.studentName||"")} · ${String(done.productName||"")} · ${new Date().toISOString()}`);
+            b.disabled = true;
+            const oldText = b.textContent;
+            b.textContent = "처리 중";
+            try{
+              if(typeof window.sebitCompleteLightMerchantRequest === "function"){
+                await window.sebitCompleteLightMerchantRequest(r.id, r.requestedYmd || lmTodayKey());
+              }else{
+                const all = lmGetTodayList();
+                const idx = all.findIndex(x=>x && x.id===r.id);
+                if(idx>-1){
+                  all[idx].status = "done";
+                  all[idx].doneAt = Date.now();
+                  lmSetTodayList(all);
+                  lmPushHistory(all[idx]);
+                  const logsRaw = readJSON(LS.shopPurchaseLog, []);
+                  const logs = Array.isArray(logsRaw) ? logsRaw : [];
+                  const done = all[idx];
+                  removePocketRequestItem(done.studentId, done);
+                  logs.push({
+                    ts: new Date().toISOString(),
+                    studentId: done.studentId,
+                    studentName: String(done.studentName||""),
+                    student: String(done.studentName||""),
+                    productId: done.productId,
+                    productName: String(done.productName||""),
+                    product: String(done.productName||""),
+                    price: Number(done.price||0)
+                  });
+                  while(logs.length > 50) logs.shift();
+                  writeJSON(LS.shopPurchaseLog, logs);
+                  pushSystemLog(`[빛의 상인] 지급완료: ${String(done.studentName||"")} · ${String(done.productName||"")} · ${new Date().toISOString()}`);
+                }
+              }
+              toast("지급 완료");
+            }catch(err){
+              console.error("[SEBIT LIGHT MERCHANT] complete failed", err);
+              toast(String(err && err.message || "지급 처리 중 오류가 났어요."));
+              b.disabled = false;
+              b.textContent = oldText;
             }
             rerender();
           });
@@ -13203,4 +13229,176 @@ function closeStudentShopPreviewModal(){
   window.addEventListener('pointerup', runBuy, {capture:true, passive:false});
   window.addEventListener('touchend', runBuy, {capture:true, passive:false});
   window.addEventListener('click', runBuy, {capture:true, passive:false});
+})();
+
+
+/* =========================================================
+   SEBIT LIGHT MERCHANT SERVER-FIRST COMPLETE 2026-05-12
+   목적:
+   - 빛의 상인 직업 체크리스트에서 '지급 확인' 후 잠시 뒤 다시 pending으로 살아나는 문제 수정
+   - 기존 localStorage 먼저 저장 → 0.5초 뒤 Firestore 반영 방식 대신
+     Firestore transaction으로 요청/포켓/이력/구매기록을 한 번에 서버 확정 후 로컬 화면만 반영
+   ========================================================= */
+(function(){
+  if(window.__sebitLightMerchantServerCompleteV1) return;
+  window.__sebitLightMerchantServerCompleteV1 = true;
+
+  function lmServerToday(){
+    try{ if(typeof lmTodayKey === 'function') return lmTodayKey(); }catch(_){ }
+    try{ if(typeof shopTodayKey === 'function') return shopTodayKey(); }catch(_){ }
+    return new Date().toISOString().slice(0,10);
+  }
+  function existsSnap(snap){
+    try{ return (typeof snap.exists === 'function') ? snap.exists() : !!snap.exists; }catch(_){ return false; }
+  }
+  function docValue(snap, fallback){
+    try{
+      if(!existsSnap(snap)) return fallback;
+      const data = snap.data() || {};
+      return data.value !== undefined ? data.value : fallback;
+    }catch(_){ return fallback; }
+  }
+  function asObj(v){ return (v && typeof v === 'object' && !Array.isArray(v)) ? {...v} : {}; }
+  function asArr(v){ return Array.isArray(v) ? v.slice() : []; }
+  function cut50(arr){ while(arr.length > 50) arr.shift(); return arr; }
+  function setLocalJsonSilently(key, value){
+    if(!key) return;
+    window.__sebitSuppressCloudPushFromPurchase = true;
+    try{ localStorage.setItem(key, JSON.stringify(value)); }
+    finally{
+      setTimeout(function(){
+        window.__sebitSuppressCloudPushFromPurchase = false;
+        try{ if(typeof __sebitShopSyncTimer !== 'undefined') clearTimeout(__sebitShopSyncTimer); }catch(_){ }
+      }, 0);
+    }
+  }
+  function lsKeyByName(name){
+    try{ if(typeof fsShopLocalStorageKeyFromName === 'function') return fsShopLocalStorageKeyFromName(name); }catch(_){ }
+    try{
+      const map = {
+        lightMerchantRequests: LS.lightMerchantRequests,
+        lightMerchantHistory: LS.lightMerchantHistory,
+        lightPocket: LS.lightPocket,
+        shopPurchaseLog: LS.shopPurchaseLog
+      };
+      return map[name] || '';
+    }catch(_){ return ''; }
+  }
+  function removePocketItemFromObject(pockets, req){
+    const sid = String(req && req.studentId || '');
+    if(!sid) return pockets;
+    const obj = asObj(pockets);
+    const list = asArr(obj[sid]);
+    let idx = -1;
+    if(req && req.pocketItemId){
+      idx = list.findIndex(function(it){ return it && String(it.id || '') === String(req.pocketItemId); });
+    }
+    if(idx < 0){
+      idx = list.findIndex(function(it){
+        return it && String(it.productId || '') === String(req && req.productId || '') &&
+          String(it.name || '') === String(req && req.productName || '') &&
+          (it.status === 'requested' || it.requesting === true);
+      });
+    }
+    if(idx < 0){
+      idx = list.findIndex(function(it){
+        return it && String(it.name || '') === String(req && req.productName || '') &&
+          (it.status === 'requested' || it.requesting === true);
+      });
+    }
+    if(idx >= 0) list.splice(idx, 1);
+    obj[sid] = list;
+    return obj;
+  }
+  function makeDoneLog(req){
+    return {
+      id: 'lm_done_' + String(req && req.id || Date.now()),
+      ts: new Date().toISOString(),
+      studentId: req && req.studentId,
+      studentName: String(req && req.studentName || ''),
+      student: String(req && req.studentName || ''),
+      productId: req && req.productId,
+      productName: String(req && req.productName || ''),
+      product: String(req && req.productName || ''),
+      price: Number(req && req.price || 0),
+      status: 'done'
+    };
+  }
+
+  window.sebitCompleteLightMerchantRequest = async function(requestId, ymd){
+    const reqId = String(requestId || '').trim();
+    const day = String(ymd || lmServerToday()).trim() || lmServerToday();
+    if(!reqId) throw new Error('지급 요청 정보를 찾지 못했어요. 새로고침 후 다시 시도해 주세요.');
+    if(typeof db === 'undefined' || !db || typeof db.runTransaction !== 'function'){
+      throw new Error('Firestore 연결을 확인할 수 없어요. 새로고침 후 다시 시도해 주세요.');
+    }
+
+    let result = null;
+    await db.runTransaction(async function(tx){
+      const reqRef = db.collection('sharedState').doc('lightMerchantRequests');
+      const pocketRef = db.collection('sharedState').doc('lightPocket');
+      const histRef = db.collection('sharedState').doc('lightMerchantHistory');
+      const logRef = db.collection('sharedState').doc('shopPurchaseLog');
+
+      const reqSnap = await tx.get(reqRef);
+      const pocketSnap = await tx.get(pocketRef);
+      const histSnap = await tx.get(histRef);
+      const logSnap = await tx.get(logRef);
+
+      const reqs = asObj(docValue(reqSnap, {}));
+      const todayList = asArr(reqs[day]);
+      let idx = todayList.findIndex(function(x){ return x && String(x.id || '') === reqId; });
+
+      // 요청 날짜가 틀리게 전달된 경우 전체 날짜에서 한 번 더 찾음
+      let realDay = day;
+      if(idx < 0){
+        Object.keys(reqs).some(function(k){
+          const list = asArr(reqs[k]);
+          const found = list.findIndex(function(x){ return x && String(x.id || '') === reqId; });
+          if(found >= 0){ realDay = k; idx = found; return true; }
+          return false;
+        });
+      }
+      if(idx < 0) throw new Error('서버 지급 요청 목록에서 이 항목을 찾지 못했어요. 새로고침 후 확인해 주세요.');
+
+      const realList = asArr(reqs[realDay]);
+      const req = {...(realList[idx] || {})};
+      if(req.status !== 'done'){
+        req.status = 'done';
+        req.doneAt = Date.now();
+      }
+      realList[idx] = req;
+      reqs[realDay] = realList;
+
+      const pockets = removePocketItemFromObject(docValue(pocketSnap, {}), req);
+
+      const hist = asArr(docValue(histSnap, []));
+      if(!hist.some(function(x){ return x && String(x.id || '') === String(req.id || ''); })){
+        hist.push(req);
+      }
+      cut50(hist);
+
+      const logs = asArr(docValue(logSnap, []));
+      const doneLogId = 'lm_done_' + String(req.id || '');
+      if(!logs.some(function(x){ return x && String(x.id || '') === doneLogId; })){
+        logs.push(makeDoneLog(req));
+      }
+      cut50(logs);
+
+      const now = Date.now();
+      tx.set(reqRef, {key:'lightMerchantRequests', value:reqs, updatedAt:now}, {merge:false});
+      tx.set(pocketRef, {key:'lightPocket', value:pockets, updatedAt:now}, {merge:false});
+      tx.set(histRef, {key:'lightMerchantHistory', value:hist, updatedAt:now}, {merge:false});
+      tx.set(logRef, {key:'shopPurchaseLog', value:logs, updatedAt:now}, {merge:false});
+      result = {reqs:reqs, pockets:pockets, hist:hist, logs:logs, done:req};
+    });
+
+    if(!result) throw new Error('지급 처리 결과를 확인하지 못했어요.');
+    setLocalJsonSilently(lsKeyByName('lightMerchantRequests'), result.reqs);
+    setLocalJsonSilently(lsKeyByName('lightPocket'), result.pockets);
+    setLocalJsonSilently(lsKeyByName('lightMerchantHistory'), result.hist);
+    setLocalJsonSilently(lsKeyByName('shopPurchaseLog'), result.logs);
+    try{ pushSystemLog(`[빛의 상인] 지급완료: ${String(result.done && result.done.studentName || '')} · ${String(result.done && result.done.productName || '')} · ${new Date().toISOString()}`); }catch(_){ }
+    return result;
+  };
 })();
