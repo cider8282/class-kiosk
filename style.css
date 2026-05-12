@@ -3401,3 +3401,20 @@ body[data-page="student-shop"] .lightshop-banner,
 body[data-page="student-shop"] .shop-deal-badge{
   pointer-events: none !important;
 }
+
+/* === SEBIT SHOP NO-SHAKE RECOVERY 2026-05-12 ===
+   구매 버튼 터치 후 카드가 계속 흔들리는 현상 방지.
+   iPad/Safari hover/transition 잔상과 반복 렌더 시 카드 이동 애니메이션을 끔.
+*/
+body[data-page="student-shop"] .lightshop-item,
+body[data-page="student-shop"] .lightshop-item:hover,
+body[data-page="student-shop"] .lightshop-item:active,
+body[data-page="student-shop"] .lightshop-item:focus-within{
+  transform: none !important;
+  transition: none !important;
+  animation: none !important;
+}
+body[data-page="student-shop"] .lightshop-buy[data-sebit-processing="1"]{
+  opacity: .65 !important;
+  pointer-events: none !important;
+}
