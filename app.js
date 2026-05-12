@@ -13584,3 +13584,298 @@ function closeStudentShopPreviewModal(){
     return result;
   };
 })();
+
+/* === SEBIT JOB CURRENT FINAL OVERRIDE 2026-05-12 ===
+   목적: 직업 마감/해제는 오늘 상태 문서 하나(sebit:jobCurrent_v1)만 사용.
+   - 기존 closed/jobdone/jobRewardPaid 문서는 읽기/쓰기 기준에서 제외
+   - 학생 마감 버튼은 이 최종 오버라이드 창에서만 처리
+   - 교사용 직업 수행 현황은 jobCurrent 문서만 읽음
+*/
+(function(){
+  if(window.__sebitJobCurrentFinalOverrideInstalled) return;
+  window.__sebitJobCurrentFinalOverrideInstalled = true;
+
+  const CURRENT_KEY = 'sebit:jobCurrent_v1';
+  const COLLECTION = 'jobState';
+  const DOC_ID = encodeURIComponent(CURRENT_KEY);
+
+  const JOBS = [
+    {id:'ranger', name:'교실 레인저', aliases:['교실레인저','레인저']},
+    {id:'fairjustice', name:'페어 저스티스', aliases:['페어저스티스','공정','공정지킴이']},
+    {id:'timekeeper', name:'타임 키퍼', aliases:['타임키퍼','시간','등교']},
+    {id:'techkeeper', name:'테크 키퍼', aliases:['테크키퍼','패드','기기']},
+    {id:'studycheck', name:'학습 체크단', aliases:['학습체크단','준비물']},
+    {id:'tidymaster', name:'정리 마스터', aliases:['정리마스터','정리']},
+    {id:'lightguardian_front', name:'빛의 파수꾼(앞)', aliases:['빛의파수꾼(앞)','빛의 파수꾼 앞','파수꾼 앞','앞']},
+    {id:'lightguardian_back', name:'빛의 파수꾼(뒤)', aliases:['빛의파수꾼(뒤)','빛의 파수꾼 뒤','파수꾼 뒤','뒤']},
+    {id:'artcurator', name:'작품 큐레이터', aliases:['작품큐레이터','작품']},
+    {id:'greensaver', name:'그린 세이버', aliases:['그린세이버','분리배출','환경']},
+    {id:'docmaster', name:'문서 마스터', aliases:['문서마스터','문서']},
+    {id:'weathercaster', name:'웨더 캐스터', aliases:['웨더캐스터','날씨']},
+    {id:'lunchsaver', name:'런치 세이버', aliases:['런치세이버','급식','런치']},
+    {id:'lightmerchant', name:'빛의 상인', aliases:['빛의상인','상점','상인']}
+  ];
+
+  function esc(s){
+    try{ if(typeof escapeHTML === 'function') return escapeHTML(s); }catch(_){}
+    return String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  }
+  function norm(s){ return String(s||'').replace(/\s+/g,'').toLowerCase(); }
+  function today(){
+    try{ if(typeof todayKey === 'function') return todayKey(); }catch(_){}
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  function toastMsg(msg){ try{ if(typeof toast === 'function') toast(msg); }catch(_){} }
+  function getDb(){
+    if(typeof db !== 'undefined' && db && typeof db.collection === 'function') return db;
+    if(window.firebase && firebase.firestore) return firebase.firestore();
+    throw new Error('Firestore 연결을 찾지 못했습니다.');
+  }
+  function readJSON(key, fallback){
+    try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }catch(_){ return fallback; }
+  }
+  function writeLocal(cur){
+    try{ localStorage.setItem(CURRENT_KEY, JSON.stringify(cur)); }catch(_){}
+    return cur;
+  }
+  function emptyCurrent(){ return { version:1, date:today(), done:{}, updatedAt:Date.now() }; }
+  function normalizeCurrent(cur){
+    const d = today();
+    if(!cur || typeof cur !== 'object' || cur.date !== d) cur = emptyCurrent();
+    if(!cur.done || typeof cur.done !== 'object') cur.done = {};
+    cur.version = 1;
+    cur.date = d;
+    return cur;
+  }
+  function localCurrent(){ return normalizeCurrent(readJSON(CURRENT_KEY, null)); }
+  function matchJob(name){
+    const n = norm(name);
+    return JOBS.find(j => [j.id, j.name, ...(j.aliases||[])].some(a => n.includes(norm(a)) || norm(a).includes(n))) || null;
+  }
+  function jobById(id){ return JOBS.find(j => j.id === id) || matchJob(id) || {id:String(id||''), name:String(id||'')}; }
+  function sid(){ try{ return String(session && session.studentId || '').trim(); }catch(_){ return ''; } }
+  function students(){
+    const arr = readJSON(LS && LS.students ? LS.students : 'students', []);
+    return Array.isArray(arr) ? arr : [];
+  }
+  function studentName(id){
+    const s = students().find(x => String(x && x.id || '') === String(id||''));
+    return s ? String(s.name || id) : String(id||'');
+  }
+  function assignState(){ return readJSON('sebit:jobsAssign_v1', {version:1,jobs:{}}); }
+  function holdersOf(jobId){
+    const out = [];
+    const a = assignState();
+    const cur = a && a.jobs ? (a.jobs[jobId] || {}) : {};
+    const raw = Array.isArray(cur.holders) ? cur.holders : (Array.isArray(cur.students) ? cur.students : []);
+    raw.forEach(x => { const v=String(x||'').trim(); if(v && !out.includes(v)) out.push(v); });
+    students().forEach(st => {
+      const stid = String(st && st.id || '').trim();
+      const js = Array.isArray(st && st.jobs) ? st.jobs : [];
+      if(stid && js.some(x => (matchJob(String(x))||{}).id === jobId) && !out.includes(stid)) out.push(stid);
+    });
+    return out;
+  }
+  function isDone(cur, jobId, studentId){
+    cur = normalizeCurrent(cur || localCurrent());
+    const list = Array.isArray(cur.done && cur.done[jobId]) ? cur.done[jobId].map(String) : [];
+    return list.includes(String(studentId||''));
+  }
+  async function loadCurrent(){
+    try{
+      const snap = await getDb().collection(COLLECTION).doc(DOC_ID).get();
+      if(snap.exists){
+        const data = snap.data() || {};
+        const raw = typeof data.raw === 'string' ? data.raw : '';
+        if(raw){
+          const cur = normalizeCurrent(JSON.parse(raw));
+          writeLocal(cur);
+          return cur;
+        }
+      }
+    }catch(err){ console.warn('[SEBIT] job current load failed', err); }
+    const cur = localCurrent();
+    writeLocal(cur);
+    return cur;
+  }
+  async function setDone(jobId, studentId, done){
+    const jid = String(jobId || '').trim();
+    const stid = String(studentId || '').trim();
+    if(!jid) throw new Error('직업 ID 없음');
+    if(!stid) throw new Error('학생 ID 없음');
+    const ref = getDb().collection(COLLECTION).doc(DOC_ID);
+    let saved = null;
+    await getDb().runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      let cur = null;
+      if(snap.exists){
+        const raw = String((snap.data() || {}).raw || '');
+        if(raw){ try{ cur = JSON.parse(raw); }catch(_){ cur = null; } }
+      }
+      cur = normalizeCurrent(cur);
+      if(!Array.isArray(cur.done[jid])) cur.done[jid] = [];
+      const set = new Set(cur.done[jid].map(String).filter(Boolean));
+      if(done) set.add(stid); else set.delete(stid);
+      cur.done[jid] = Array.from(set);
+      cur.updatedAt = Date.now();
+      saved = cur;
+      tx.set(ref, { key: CURRENT_KEY, raw: JSON.stringify(cur), updatedAt: Date.now() }, { merge:false });
+    });
+    writeLocal(saved || localCurrent());
+    return saved;
+  }
+  function paintBadge(view, jobId, studentId){
+    const cur = localCurrent();
+    const done = isDone(cur, jobId, studentId);
+    let badge = view.querySelector('[data-job-current-final-badge]');
+    if(!badge){
+      badge = document.createElement('div');
+      badge.setAttribute('data-job-current-final-badge','1');
+      badge.style.cssText = 'margin:10px 0;padding:10px 13px;border-radius:14px;font-weight:900;border:1px solid rgba(0,0,0,.08);';
+      const top = view.querySelector('.modal-head,.jobcheck-view-head,header') || view.firstElementChild;
+      if(top && top.parentNode) top.parentNode.insertBefore(badge, top.nextSibling); else view.prepend(badge);
+    }
+    badge.textContent = done ? '✅ 오늘 내 직업 마감 완료' : '⏱️ 오늘 내 직업 기록 대기';
+    badge.style.background = done ? '#dff5e8' : '#fff4d9';
+    badge.style.color = done ? '#176c3b' : '#7b5200';
+    Array.from(view.querySelectorAll('button')).forEach(btn => {
+      const t = String(btn.textContent||'');
+      if(t.includes('기록 마감') || (t.includes('마감') && !t.includes('해제') && !t.includes('닫기'))) btn.disabled = done;
+      if(t.includes('마감 해제')) btn.disabled = !done;
+    });
+  }
+
+  // 학생용 직업 체크리스트 열기: 기존 체크리스트 화면을 빌리되, 마감 저장은 final current 문서만 사용한다.
+  window.__sebitOpenExistingJobChecklist = function(jobName){
+    const job = matchJob(jobName);
+    const studentId = sid();
+    if(!job || !studentId){ toastMsg('직업 또는 학생 정보를 찾지 못했습니다.'); return; }
+
+    document.getElementById('studentJobChecklistScratch')?.remove();
+    document.querySelectorAll('.jobcheck-view-overlay[data-job-current-final="1"], .jobcheck-view-overlay[data-student-opened="1"]').forEach(el => { try{ el.remove(); }catch(_){} });
+
+    const scratch = document.createElement('div');
+    scratch.id = 'studentJobChecklistScratch';
+    scratch.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
+    document.body.appendChild(scratch);
+    try{
+      renderJobsAdmin(scratch);
+      const hubBtn = Array.from(scratch.querySelectorAll('button')).find(b => String(b.textContent||'').includes('직업 체크리스트 관리'));
+      if(!hubBtn) throw new Error('직업 체크리스트 관리 버튼 없음');
+      hubBtn.click();
+      const cards = Array.from(scratch.querySelectorAll('.jobcheck-hub-card'));
+      const card = cards.find(c => {
+        const t = norm(c.querySelector('.name')?.textContent || c.textContent || '');
+        return [job.id, job.name, ...(job.aliases||[])].some(a => t.includes(norm(a)) || norm(a).includes(t));
+      });
+      if(!card) throw new Error('직업 카드 없음');
+      const openBtn = Array.from(card.querySelectorAll('button')).find(b => String(b.textContent||'').trim() === '열기') || card.querySelector('button');
+      if(!openBtn) throw new Error('열기 버튼 없음');
+      openBtn.click();
+      const view = scratch.querySelector('.jobcheck-view-overlay');
+      if(!view) throw new Error('체크리스트 화면 없음');
+
+      view.dataset.jobCurrentFinal = '1';
+      view.dataset.jobId = job.id;
+      view.dataset.studentId = studentId;
+      view.style.zIndex = '9999';
+      view.style.pointerEvents = 'auto';
+      document.body.appendChild(view);
+      scratch.remove();
+      document.body.classList.add('no-scroll');
+
+      loadCurrent().then(()=>paintBadge(view, job.id, studentId));
+      paintBadge(view, job.id, studentId);
+
+      view.addEventListener('click', async function(e){
+        const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+        if(!btn) return;
+        const text = String(btn.textContent||'').replace(/\s+/g,' ').trim();
+        const isOpen = text.includes('마감 해제');
+        const isClose = text.includes('기록 마감') || (text === '마감') || (text.includes('마감') && !isOpen && !text.includes('닫기'));
+        if(!isOpen && !isClose) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if(typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        btn.disabled = true;
+        try{
+          toastMsg(isOpen ? '마감 해제를 오늘 상태에 저장하는 중입니다.' : '직업 마감을 오늘 상태에 저장하는 중입니다.');
+          await setDone(job.id, studentId, isClose);
+          paintBadge(view, job.id, studentId);
+          toastMsg(isClose ? '내 직업 기록이 오늘 상태에 저장되었습니다.' : '내 직업 마감이 오늘 상태에서 해제되었습니다.');
+        }catch(err){
+          console.error('[SEBIT] job current final save failed', err);
+          btn.disabled = false;
+          toastMsg('직업 마감 저장에 실패했습니다. 다시 시도해 주세요.');
+        }
+      }, true);
+
+      view.querySelectorAll('button').forEach(btn => {
+        if(String(btn.textContent||'').includes('닫기')){
+          btn.addEventListener('click', () => setTimeout(()=>{
+            if(!document.querySelector('.jobcheck-view-overlay[data-job-current-final="1"]')) document.body.classList.remove('no-scroll');
+          }, 0));
+        }
+      });
+    }catch(err){
+      scratch.remove();
+      console.warn('[SEBIT] final job checklist open failed', err);
+      toastMsg('직업 체크리스트 연결을 확인해야 합니다.');
+    }
+  };
+
+  window.renderJobPerformanceAdmin = function(root){
+    if(!root) return;
+    function draw(cur, statusText){
+      cur = normalizeCurrent(cur || localCurrent());
+      const completed = JOBS.filter(j => { const h = holdersOf(j.id); return h.length > 0 && h.every(st => isDone(cur, j.id, st)); }).length;
+      root.innerHTML = `
+        <style>
+          .jobperf-wrap{display:grid;gap:14px}.jobperf-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.jobperf-summary{display:flex;gap:10px;flex-wrap:wrap}.jobperf-pill{padding:10px 14px;border:1px solid rgba(0,0,0,.08);border-radius:16px;background:rgba(255,255,255,.72);font-weight:800}.jobperf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.jobperf-card{border:1px solid rgba(0,0,0,.08);border-radius:18px;background:rgba(255,255,255,.8);padding:14px;box-shadow:0 8px 22px rgba(0,0,0,.04)}.jobperf-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:8px}.jobperf-title{font-size:16px;font-weight:900}.jobperf-badge{font-size:12px;font-weight:900;border-radius:999px;padding:6px 10px;white-space:nowrap}.jobperf-badge.done{background:#dff5e8;color:#176c3b;border:1px solid #bde8cf}.jobperf-badge.partial{background:#e8f0ff;color:#2855b8;border:1px solid #c8d8ff}.jobperf-badge.wait{background:#fff4d9;color:#7b5200;border:1px solid #f0dc9b}.jobperf-meta{font-size:13px;color:#666;line-height:1.5;margin-top:6px}.jobperf-result{margin-top:10px;padding:10px;border-radius:14px;background:rgba(245,247,250,.9);font-size:13px;line-height:1.5;color:#444}.jobperf-students{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.jobperf-student{font-size:12px;font-weight:800;padding:5px 8px;border-radius:999px;border:1px solid rgba(0,0,0,.08);background:#fff}.jobperf-student.done{background:#dff5e8;color:#176c3b;border-color:#bde8cf}.jobperf-student.wait{background:#fff4d9;color:#7b5200;border-color:#f0dc9b}.jobperf-tools{display:flex;justify-content:flex-end;gap:8px}.jobperf-note{font-size:12px;color:#666;line-height:1.45}
+        </style>
+        <div class="jobperf-wrap">
+          <div class="jobperf-head">
+            <div><div class="muted">${esc(cur.date)} 기준 · 오늘 상태 문서 하나만 읽음</div><div class="jobperf-note">Firestore: jobState / ${esc(DOC_ID)}</div><div class="jobperf-note">${esc(statusText || '')}</div></div>
+            <div class="jobperf-summary"><div class="jobperf-pill">전체 완료 ${completed} / ${JOBS.length}</div><div class="jobperf-pill">진행 중 ${JOBS.length-completed}</div></div>
+          </div>
+          <div class="jobperf-tools"><button class="btn small" type="button" id="jobperfRefreshBtn">새로고침</button></div>
+          <div class="jobperf-grid">
+          ${JOBS.map(j => {
+            const h = holdersOf(j.id);
+            const doneList = h.filter(st => isDone(cur, j.id, st));
+            const all = h.length > 0 && doneList.length === h.length;
+            const any = doneList.length > 0;
+            const cls = all ? 'done' : (any ? 'partial' : 'wait');
+            const label = all ? '마감 완료' : (any ? `일부 마감 ${doneList.length}/${h.length}` : '대기 중');
+            return `<div class="jobperf-card"><div class="jobperf-top"><div class="jobperf-title">${esc(j.name)}</div><div class="jobperf-badge ${cls}">${esc(label)}</div></div><div class="jobperf-meta">담당: ${h.length ? esc(h.map(studentName).join(', ')) : '배정 없음'}</div>${h.length ? `<div class="jobperf-students">${h.map(st => `<span class="jobperf-student ${isDone(cur,j.id,st)?'done':'wait'}">${esc(studentName(st))} · ${isDone(cur,j.id,st)?'완료':'대기'}</span>`).join('')}</div>` : ''}<div class="jobperf-result">${any ? '오늘 상태 문서에 마감 저장됨' : '아직 학생 체크리스트가 마감되지 않았습니다.'}</div></div>`;
+          }).join('')}
+          </div>
+        </div>`;
+      root.querySelector('#jobperfRefreshBtn')?.addEventListener('click', async () => {
+        draw(localCurrent(), '서버에서 다시 읽는 중...');
+        const next = await loadCurrent();
+        draw(next, '서버 읽기 완료');
+      });
+    }
+    draw(localCurrent(), '서버에서 읽는 중...');
+    loadCurrent().then(cur => draw(cur, '서버 읽기 완료')).catch(() => draw(localCurrent(), '서버 읽기 실패 · 로컬 캐시 표시'));
+  };
+
+  // 기존 renderStudentJobStatusHTML이 있으면 마감 상태 표시만 현재 문서 기준으로 보정한다.
+  const oldStudentJobStatusHTML = window.renderStudentJobStatusHTML;
+  if(typeof oldStudentJobStatusHTML === 'function'){
+    window.renderStudentJobStatusHTML = function(){
+      const html = oldStudentJobStatusHTML.apply(this, arguments);
+      try{
+        const stid = sid();
+        const cur = localCurrent();
+        const myJobs = [];
+        const sts = students().find(s => String(s.id||'') === stid);
+        if(sts && Array.isArray(sts.jobs)) sts.jobs.forEach(j => { const m = matchJob(j); if(m) myJobs.push(m); });
+        const doneText = myJobs.some(j => isDone(cur, j.id, stid)) ? '오늘 직업 마감 완료' : '오늘 직업 기록 대기';
+        return String(html).replace(/기록 대기|마감 완료|오늘 직업 마감 완료|오늘 직업 기록 대기/g, doneText);
+      }catch(_){ return html; }
+    };
+  }
+})();
